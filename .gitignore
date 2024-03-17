@@ -1,0 +1,6 @@
+*.delphilsp.json
+*.local
+__history/
+Win32/
+.vscode/
+EditInVSCode.dsv

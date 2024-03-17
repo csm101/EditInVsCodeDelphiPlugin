@@ -1,0 +1,36 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{E47F4266-956F-4802-999A-C7C71F319019}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="EditInVSCode.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="EditInVSCode">
+        <MSBuild Projects="EditInVSCode.dproj"/>
+    </Target>
+    <Target Name="EditInVSCode:Clean">
+        <MSBuild Projects="EditInVSCode.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="EditInVSCode:Make">
+        <MSBuild Projects="EditInVSCode.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="EditInVSCode"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="EditInVSCode:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="EditInVSCode:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
