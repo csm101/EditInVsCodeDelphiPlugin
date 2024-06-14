@@ -3,4 +3,9 @@
 __history/
 Win32/
 .vscode/
-EditInVSCode.dsv
+*.dsv
+*.bak
+*.~dsk
+*.dsk
+*.identcache
+*.skincfg

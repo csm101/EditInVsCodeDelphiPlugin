@@ -33,6 +33,6 @@ requires
 
 contains
   DGVisualStudioCodeIntegration in 'DGVisualStudioCodeIntegration.pas',
-  OSCommandLineExecutor in 'OSCommandLineExecutor.pas';
+  OSCmdLineExecutor in 'OSCmdLineExecutor.pas';
 
 end.

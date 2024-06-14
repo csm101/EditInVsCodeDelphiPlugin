@@ -1,4 +1,4 @@
-﻿unit OSCommandLineExecutor;
+﻿unit OSCmdLineExecutor;
 interface
 uses windows,classes;
 

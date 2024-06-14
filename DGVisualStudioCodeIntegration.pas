@@ -1,83 +1,141 @@
 ﻿unit DGVisualStudioCodeIntegration;
 
 interface
-procedure OpenCurrentFileInVisualStudioCode;
 
 procedure Register;
-
 
 implementation
 uses
   System.Classes,
   System.SysUtils,
-  ToolsApi,
-  Menus,
-  OSCommandLineExecutor,
-  Dialogs,
-  ActnList,
-  Forms,
-  ShellAPI,
-  Windows;
+  System.Generics.Collections,                                                                 
+  ToolsAPI,
+  Vcl.Menus,
+  OSCmdLineExecutor,
+  Vcl.Dialogs,
+  Vcl.ActnList,
+  Vcl.Forms,
+  Winapi.Windows,
+  WinApi.ShellAPI;
 
-procedure SaveAllModules;
+
+
+// Returns true if the module was saved successfully (or it didn't need to be saved)
+function SaveModule(Module: IOTAModule): boolean;
+var 
+  i: Integer;
+  editor: IOTAEditor;
+begin
+  for i := 0 to Module.ModuleFileCount - 1 do begin
+    editor := Module.ModuleFileEditors[i];
+    if not Editor.Modified then
+      continue;
+    exit(Module.Save(False, True));
+  end;
+  exit(true);
+end;
+
+function SaveAllModules:boolean;
 var
   Services: IOTAModuleServices;
   I: Integer;
   Module: IOTAModule;
-
 begin
+  result:=false;
   Services := BorlandIDEServices as IOTAModuleServices;
-  for I := 0 to Services.ModuleCount - 1 do
-  begin
+  for I := 0 to Services.ModuleCount - 1 do begin
     Module := Services.Modules[I];
-    var editor := Module.CurrentEditor;
-    if editor = nil then
-      continue;
-
-    if editor.Modified then
-      Module.Save(False, True);
+    if not SaveModule(Module) then
+      exit;
   end;
+  result := true;
 end;
 
-procedure OpenCurrentFileInVisualStudioCode;
-var
-  SourceEditor: IOTASourceEditor;
+function FindSourceEditor(Module: IOTAModule; const FileExtensions: array of string): IOTASourceEditor;
+var 
+  i: Integer;
+  editor: IOTAEditor;
+begin
+  for i := 0 to Module.ModuleFileCount - 1 do
+  begin
+    editor := Module.ModuleFileEditors[i];
+    if not Supports(editor, IOTASourceEditor, Result) then
+      continue;
+    var ext := ExtractFileExt(Result.FileName).toUpper;
+    for var scan in FileExtensions do
+      if scan = ext then
+        exit;
+  end;
+
+  Result := nil;
+end;
+
+type TCurrentSourceFileInfos = record
+  FileName: string;
+  Line: Integer;
+  Column: Integer;
+end;
+
+function GetCurrentSourceFileInfos: TCurrentSourceFileInfos;
+var  EditView: IOTAEditView;
 begin
   var Services := BorlandIDEServices as IOTAModuleServices;
 
   var Module := Services.CurrentModule;
-  if Module = nil then begin
-     ShowMessage('No current module');
-     Exit;
+  if Module = nil then
+    raise Exception.Create('Current module not found');
+
+  var editor := FindSourceEditor(Module, ['.PAS', '.DPR', '.INC', '.DPK','.DFM','.FMX']);
+
+  if editor = nil then
+    raise Exception.Create('Current module does not contain a source editor');
+  if editor.EditViewCount = 0 then
+     raise Exception.Create('Current module does not have visibile source code editors');
+
+  Result.FileName := editor.FileName;
+  result.Line := -1;
+  result.Column := -1;
+
+  EditView := editor.GetEditView(0); // Assume we always work with the first view
+  if EditView <> nil then begin
+    Result.Line := EditView.CursorPos.Line;
+    Result.Column := EditView.CursorPos.Col;
+  end
+end;
+
+
+procedure OpenCurrentFileInVisualStudioCode;
+begin
+  var Services := BorlandIDEServices as IOTAModuleServices;
+  var sourceInfos: TCurrentSourceFileInfos;
+  try
+    sourceInfos := GetCurrentSourceFileInfos;
+  except 
+    on E: Exception do begin
+      ShowMessage(E.Message);
+      Exit;
+    end;
   end;
 
-  if not Supports(Module.CurrentEditor, IOTASourceEditor, SourceEditor) then begin
-     ShowMessage('Current module does not support IOTASourceEditor interface');
-     exit;
-  end;
-
-  var EditView:IOTAEditView := SourceEditor.GetEditView(0); // I assume we are working only in the first view
-  if EditView = nil then begin
-     ShowMessage('Can''t locate editor view');
-     exit;
-  end;
-
-  var FileName := Module.FileName;
-
+  var FileName := sourceInfos.FileName;
   var project := (BorlandIDEServices as IOTAModuleServices).GetActiveProject;
 
   if project = nil then begin
-       ShowMessage('Currently these isn''t any active project');
+       ShowMessage('No active project found');
        exit;
   end;
 
   var ProjectPath := ExtractFilePath(project.FileName);
 
-  SaveAllModules;
+  if not SaveAllModules then
+    exit;
 
-  var CursorPos := EditView.CursorPos;
+  var cmdline:string;
+  if sourceInfos.Line < 0 then
+    cmdline := Format('cmd /c "code --reuse-window %s"', [ProjectPath])
+  else
+    cmdline := Format('cmd /c "code --reuse-window %s -g %s:%d:%d"', [ProjectPath, FileName, sourceInfos.Line, sourceInfos.Column]);
 
-  var cmdline := Format('cmd /c "code --reuse-window %s -g %s:%d"', [ProjectPath, FileName, CursorPos.Line]);
 
   var executor := TOSCommandLineExecutor.Create(nil);
   try
@@ -90,37 +148,63 @@ begin
 end;
 
 
-
-Type
-   TVSCMenuHandler=class
-   public
+type
+  TMenuHandler = class
+  strict private
      Item:TMenuItem;
+     Action: TProc;
      procedure OnExecute(Sender: TObject);
-     Constructor Create;
+     Constructor Create(aCaption:String; aAction:TProc);
+  class var
+     MenuHandlers : TObjectList<TMenuHandler>;
+  public
      destructor Destroy; override;
+     class constructor create;
+     class destructor Destroy;
+     class procedure AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc);
    end;
 
-var MenuHandler :TVSCMenuHandler = nil;
-
-Constructor TVSCMenuHandler.Create;
+class constructor TMenuHandler.Create;
 begin
-   inherited;
+   MenuHandlers := TObjectList<TMenuHandler>.Create;
+end;
+
+class destructor TMenuHandler.Destroy;
+begin
+   MenuHandlers.free;
+end;
+
+Constructor TMenuHandler.Create(aCaption:String; aAction:TProc);
+begin
+   inherited Create;
+   Action := aAction;
    Item := TMenuItem.Create(nil);
-   item.Caption := 'Open in Visual Studio Code';
+   Item.Caption := aCaption;
    Item.OnClick := OnExecute;
 end;
 
-destructor TVSCMenuHandler.Destroy;
+destructor TMenuHandler.Destroy;
 begin
    FreeAndNil(Item);
    inherited;
 end;
 
-procedure TVSCMenuHandler.OnExecute(Sender: TObject);
+procedure TMenuHandler.OnExecute(Sender: TObject);
 begin
-   OpenCurrentFileInVisualStudioCode;
+   if assigned(action) then
+     Action;
 end;
 
+
+class procedure TMenuHandler.AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc);
+begin
+   var handler := TMenuHandler.Create(aCaption, aAction);
+   MenuHandlers.Add(handler);
+   // I am adding menu items to the top of the Tools menu because all 
+   // the menu items under "Configure Tools..." get deleted whenever you
+   // open its dialog.
+   NTAServices.AddActionMenu( 'ToolsMenu', nil, handler.Item ,False, True);
+end;
 
 procedure Register;
 var
@@ -140,17 +224,13 @@ begin
         TThread.Synchronize(nil,
           procedure
           begin
-            MenuHandler := TVSCMenuHandler.Create;
-            NTAServices.AddActionMenu( 'ToolsMenu', nil, MenuHandler.Item ,True, True);
+            TMenuHandler.AddMenuItem(NTAServices, '-', nil);
+            TMenuHandler.AddMenuItem(NTAServices, 'Open in Visual Studio Code', OpenCurrentFileInVisualStudioCode);
           end);
         break;
       end;
     end).Start;
 end;
 
-initialization
-
-finalization
-   FreeAndNil(MenuHandler);
 end.
 
