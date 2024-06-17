@@ -154,33 +154,44 @@ type
      Item:TMenuItem;
      Action: TProc;
      procedure OnExecute(Sender: TObject);
-     Constructor Create(aCaption:String; aAction:TProc);
+     Constructor Create(aCaption:String; aAction:TProc; aShortcut: String);
   class var
      MenuHandlers : TObjectList<TMenuHandler>;
+     FActionList: TActionList;
   public
      destructor Destroy; override;
      class constructor create;
      class destructor Destroy;
-     class procedure AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc);
+     class procedure AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc; aShortcut: String = '');
    end;
 
 class constructor TMenuHandler.Create;
 begin
    MenuHandlers := TObjectList<TMenuHandler>.Create;
+   FActionList := TActionList.Create(nil);
 end;
 
 class destructor TMenuHandler.Destroy;
 begin
    MenuHandlers.free;
+   FActionList.Free;
 end;
 
-Constructor TMenuHandler.Create(aCaption:String; aAction:TProc);
+Constructor TMenuHandler.Create(aCaption:String; aAction:TProc;aShortcut: String);
+var
+  MyAction: TAction;
 begin
-   inherited Create;
-   Action := aAction;
-   Item := TMenuItem.Create(nil);
-   Item.Caption := aCaption;
-   Item.OnClick := OnExecute;
+  inherited Create;
+  Action := aAction;
+  MyAction := TAction.Create(FActionList);
+  MyAction.Caption := aCaption;
+  MyAction.OnExecute := OnExecute;
+
+  if aShortcut <> '' then
+    MyAction.ShortCut := TextToShortCut(aShortcut);
+
+  Item := TMenuItem.Create(nil);
+  Item.Action := MyAction;
 end;
 
 destructor TMenuHandler.Destroy;
@@ -196,9 +207,9 @@ begin
 end;
 
 
-class procedure TMenuHandler.AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc);
+class procedure TMenuHandler.AddMenuItem(NTAServices: INTAServices; aCaption:String; aAction:TProc; aShortcut: String = '');
 begin
-   var handler := TMenuHandler.Create(aCaption, aAction);
+   var handler := TMenuHandler.Create(aCaption, aAction,aShortcut);
    MenuHandlers.Add(handler);
    // I am adding menu items to the top of the Tools menu because all 
    // the menu items under "Configure Tools..." get deleted whenever you
@@ -225,7 +236,7 @@ begin
           procedure
           begin
             TMenuHandler.AddMenuItem(NTAServices, '-', nil);
-            TMenuHandler.AddMenuItem(NTAServices, 'Open in Visual Studio Code', OpenCurrentFileInVisualStudioCode);
+            TMenuHandler.AddMenuItem(NTAServices, 'Open in Visual Studio Code', OpenCurrentFileInVisualStudioCode, 'Ctrl+\');
           end);
         break;
       end;
