@@ -1,11 +1,43 @@
-*.delphilsp.json
-*.local
-__history/
-Win32/
-.vscode/
 *.dsv
 *.bak
-*.~dsk
-*.dsk
-*.identcache
 *.skincfg
+
+# Delphi compiler-generated binaries (safe to delete)
+*.exe
+*.dll
+*.bpl
+*.bpi
+*.dcp
+*.so
+*.apk
+*.drc
+*.map
+*.dres
+*.rsm
+*.tds
+*.dcu
+*.lib
+*.a
+*.o
+*.ocx
+
+# Delphi local files (user-specific info)
+*.local
+*.identcache
+*.projdata
+*.tvsconfig
+*.dsk
+*.delphilsp.json
+.vscode/
+
+# Delphi history and backups
+__history/
+__recovery/
+*.~*
+
+# Compiled Binary Folders
+Android64/
+Linux64/
+Win32/
+Win64/
+TMSWEB/
