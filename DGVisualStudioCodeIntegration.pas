@@ -141,7 +141,11 @@ begin
   try
      executor.WorkDir := ExtractFilePath(filename);
      executor.CmdLine := Cmdline;
-     executor.Execute;
+     executor.Execute(
+       procedure(Txt: string)
+       begin
+        ShowMessage(Format('Execution error: %s', [Txt]));
+       end, nil);
   finally
      executor.Free;
   end;
