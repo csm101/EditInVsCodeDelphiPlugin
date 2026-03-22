@@ -5,7 +5,7 @@
 {$ALIGN 8}
 {$ASSERTIONS ON}
 {$BOOLEVAL OFF}
-{$DEBUGINFO OFF}
+{$DEBUGINFO ON}
 {$EXTENDEDSYNTAX ON}
 {$IMPORTEDDATA ON}
 {$IOCHECKS ON}
@@ -25,6 +25,7 @@
 {$IMAGEBASE $400000}
 {$DEFINE DEBUG}
 {$ENDIF IMPLICITBUILDING}
+{$DESIGNONLY}
 {$IMPLICITBUILD ON}
 
 requires
@@ -33,6 +34,9 @@ requires
 
 contains
   DGVisualStudioCodeIntegration in 'DGVisualStudioCodeIntegration.pas',
-  OSCmdLineExecutor in 'OSCmdLineExecutor.pas';
+  OSCmdLineExecutor in 'OSCmdLineExecutor.pas',
+  PluginSettings in 'PluginSettings.pas',
+  FrmSettingsFrame in 'FrmSettingsFrame.pas' {FrmSettingsFrame: TFrame},
+  FrmVSCodeLaunchError in 'FrmVSCodeLaunchError.pas' {FrmVSCodeLaunchError};
 
 end.

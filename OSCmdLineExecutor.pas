@@ -1,6 +1,6 @@
 ﻿unit OSCmdLineExecutor;
 interface
-uses windows,classes;
+uses Winapi.Windows,classes;
 
 type
   TOSCommandLineExecutor = class;
