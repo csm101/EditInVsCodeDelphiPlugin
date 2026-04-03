@@ -9,7 +9,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 0
     Width = 505
     Height = 15
-    Caption = 
+    Caption =
       'Select the editor(s) that should appear in the Tools menu. Short' +
       'cuts take effect after clicking OK.'
   end
@@ -18,7 +18,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 319
     Width = 332
     Height = 30
-    Caption = 
+    Caption =
       'If your are using another code editor forked from Visual Studio,' +
       #13#10' you can configure it here:'
   end
@@ -70,7 +70,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 22
     Width = 128
     Height = 19
-    Caption = 
+    Caption =
       '<a href="https://code.visualstudio.com/">code.visualstudio.com/<' +
       '/a>'
     TabOrder = 1
@@ -85,13 +85,22 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Modifiers = []
     TabOrder = 2
   end
+  object btnVSCodeClearShortcut: TButton
+    Left = 205
+    Top = 45
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 3
+    OnClick = BuiltInClearShortcutClick
+  end
   object btnVSCodeAdvanced: TButton
-    Left = 214
+    Left = 255
     Top = 45
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 3
+    TabOrder = 4
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkCursorEnabled: TCheckBox
@@ -120,13 +129,22 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Modifiers = []
     TabOrder = 6
   end
+  object btnCursorClearShortcut: TButton
+    Left = 205
+    Top = 103
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 7
+    OnClick = BuiltInClearShortcutClick
+  end
   object btnCursorAdvanced: TButton
-    Left = 214
+    Left = 255
     Top = 103
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 7
+    TabOrder = 8
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkWindsurfEnabled: TCheckBox
@@ -155,13 +173,22 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Modifiers = []
     TabOrder = 10
   end
+  object btnWindsurfClearShortcut: TButton
+    Left = 205
+    Top = 161
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 11
+    OnClick = BuiltInClearShortcutClick
+  end
   object btnWindsurfAdvanced: TButton
-    Left = 214
+    Left = 255
     Top = 161
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 11
+    TabOrder = 12
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkTraeEnabled: TCheckBox
@@ -190,13 +217,22 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Modifiers = []
     TabOrder = 14
   end
+  object btnTraeClearShortcut: TButton
+    Left = 205
+    Top = 219
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 15
+    OnClick = BuiltInClearShortcutClick
+  end
   object btnTraeAdvanced: TButton
-    Left = 214
+    Left = 255
     Top = 219
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 15
+    TabOrder = 16
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkVSCodiumEnabled: TCheckBox
@@ -225,13 +261,22 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Modifiers = []
     TabOrder = 18
   end
+  object btnVSCodiumClearShortcut: TButton
+    Left = 205
+    Top = 277
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 19
+    OnClick = BuiltInClearShortcutClick
+  end
   object btnVSCodiumAdvanced: TButton
-    Left = 214
+    Left = 255
     Top = 277
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 19
+    TabOrder = 20
     OnClick = BuiltInAdvancedSettingsClick
   end
   object sbCustomEditors: TScrollBox
@@ -239,7 +284,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 352
     Width = 580
     Height = 116
-    TabOrder = 20
+    TabOrder = 21
   end
   object btnAddCustomEditor: TButton
     Left = 426
@@ -247,7 +292,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Width = 170
     Height = 25
     Caption = 'Add Custom Editor...'
-    TabOrder = 21
+    TabOrder = 22
     OnClick = btnAddCustomEditorClick
   end
   object lnkProjectHome: TLinkLabel
@@ -255,10 +300,10 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 478
     Width = 162
     Height = 19
-    Caption = 
+    Caption =
       '<a href="https://github.com/csm101/EditInVsCodeDelphiPlugin">Pro' +
       'ject home page on GitHub</a>'
-    TabOrder = 22
+    TabOrder = 23
     OnLinkClick = HomePageLinkClick
   end
 end

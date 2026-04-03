@@ -25,6 +25,7 @@ type
     chkEnabled: TCheckBox;
     edDisplayName: TEdit;
     hkShortcut: THotKey;
+    btnClearShortcut: TButton;
     btnCustomize: TButton;
     btnRemove: TButton;
     EditorSettings: TEditorSettings;
@@ -35,22 +36,27 @@ type
     chkVSCodeEnabled: TCheckBox;
     lnkVSCodeHome: TLinkLabel;
     hkVSCodeShortcut: THotKey;
+    btnVSCodeClearShortcut: TButton;
     btnVSCodeAdvanced: TButton;
     chkCursorEnabled: TCheckBox;
     lnkCursorHome: TLinkLabel;
     hkCursorShortcut: THotKey;
+    btnCursorClearShortcut: TButton;
     btnCursorAdvanced: TButton;
     chkWindsurfEnabled: TCheckBox;
     lnkWindsurfHome: TLinkLabel;
     hkWindsurfShortcut: THotKey;
+    btnWindsurfClearShortcut: TButton;
     btnWindsurfAdvanced: TButton;
     chkTraeEnabled: TCheckBox;
     lnkTraeHome: TLinkLabel;
     hkTraeShortcut: THotKey;
+    btnTraeClearShortcut: TButton;
     btnTraeAdvanced: TButton;
     chkVSCodiumEnabled: TCheckBox;
     lnkVSCodiumHome: TLinkLabel;
     hkVSCodiumShortcut: THotKey;
+    btnVSCodiumClearShortcut: TButton;
     btnVSCodiumAdvanced: TButton;
     btnAddCustomEditor: TButton;
     lblBuiltInHint: TLabel;
@@ -64,6 +70,8 @@ type
     Label5: TLabel;
     procedure BuiltInAdvancedSettingsClick(Sender: TObject);
     procedure btnAddCustomEditorClick(Sender: TObject);
+    procedure BuiltInClearShortcutClick(Sender: TObject);
+    procedure CustomEditorClearShortcutClick(Sender: TObject);
     procedure CustomEditorCustomizeClick(Sender: TObject);
     procedure CustomEditorRemoveClick(Sender: TObject);
     procedure HomePageLinkClick(Sender: TObject; const Link: string; LinkType: TSysLinkType);
@@ -181,6 +189,29 @@ begin
   RebuildCustomEditorRows;
 end;
 
+procedure TFrmSettingsFrame.BuiltInClearShortcutClick(Sender: TObject);
+begin
+  if Sender = btnVSCodeClearShortcut then
+    hkVSCodeShortcut.HotKey := 0
+  else if Sender = btnCursorClearShortcut then
+    hkCursorShortcut.HotKey := 0
+  else if Sender = btnWindsurfClearShortcut then
+    hkWindsurfShortcut.HotKey := 0
+  else if Sender = btnTraeClearShortcut then
+    hkTraeShortcut.HotKey := 0
+  else if Sender = btnVSCodiumClearShortcut then
+    hkVSCodiumShortcut.HotKey := 0;
+end;
+
+procedure TFrmSettingsFrame.CustomEditorClearShortcutClick(Sender: TObject);
+begin
+  var Row := FindCustomEditorRow(Sender);
+  if Row = nil then
+    Exit;
+
+  Row.hkShortcut.HotKey := 0;
+end;
+
 procedure TFrmSettingsFrame.CustomEditorCustomizeClick(Sender: TObject);
 begin
   SaveCustomEditorControls;
@@ -260,6 +291,8 @@ begin
 
   for var Row in FCustomEditorRows do begin
     if Sender = Row.btnCustomize then
+      Exit(Row);
+    if Sender = Row.btnClearShortcut then
       Exit(Row);
     if Sender = Row.btnRemove then
       Exit(Row);
@@ -350,24 +383,33 @@ begin
       Row.hkShortcut.Parent := Row.Panel;
       Row.hkShortcut.Left := 250;
       Row.hkShortcut.Top := 8;
-      Row.hkShortcut.Width := 120;
+      Row.hkShortcut.Width := 110;
       Row.hkShortcut.Height := 21;
       Row.hkShortcut.HotKey := EditorDraft.Shortcut;
 
+      Row.btnClearShortcut := TButton.Create(Row.Panel);
+      Row.btnClearShortcut.Parent := Row.Panel;
+      Row.btnClearShortcut.Left := 366;
+      Row.btnClearShortcut.Top := 6;
+      Row.btnClearShortcut.Width := 44;
+      Row.btnClearShortcut.Height := 25;
+      Row.btnClearShortcut.Caption := 'Clear';
+      Row.btnClearShortcut.OnClick := CustomEditorClearShortcutClick;
+
       Row.btnCustomize := TButton.Create(Row.Panel);
       Row.btnCustomize.Parent := Row.Panel;
-      Row.btnCustomize.Left := 380;
+      Row.btnCustomize.Left := 416;
       Row.btnCustomize.Top := 6;
-      Row.btnCustomize.Width := 90;
+      Row.btnCustomize.Width := 84;
       Row.btnCustomize.Height := 25;
       Row.btnCustomize.Caption := 'Customize';
       Row.btnCustomize.OnClick := CustomEditorCustomizeClick;
 
       Row.btnRemove := TButton.Create(Row.Panel);
       Row.btnRemove.Parent := Row.Panel;
-      Row.btnRemove.Left := 478;
+      Row.btnRemove.Left := 506;
       Row.btnRemove.Top := 6;
-      Row.btnRemove.Width := 75;
+      Row.btnRemove.Width := 60;
       Row.btnRemove.Height := 25;
       Row.btnRemove.Caption := 'Remove';
       Row.btnRemove.OnClick := CustomEditorRemoveClick;
