@@ -7,11 +7,11 @@ object FrmVSCodeLaunchError: TFrmVSCodeLaunchError
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
-  Font.Height = -11
+  Font.Height = -12
   Font.Name = 'Segoe UI'
   Font.Style = []
   Position = poScreenCenter
-  TextHeight = 13
+  TextHeight = 15
   object lblTitle: TLabel
     AlignWithMargins = True
     Left = 8
@@ -44,8 +44,6 @@ object FrmVSCodeLaunchError: TFrmVSCodeLaunchError
     ScrollBars = ssBoth
     TabOrder = 0
     WordWrap = False
-    ExplicitWidth = 962
-    ExplicitHeight = 550
   end
   object pnlBottom: TPanel
     Left = 0
@@ -55,16 +53,14 @@ object FrmVSCodeLaunchError: TFrmVSCodeLaunchError
     Align = alBottom
     BevelOuter = bvNone
     TabOrder = 1
-    ExplicitTop = 594
-    ExplicitWidth = 978
     DesignSize = (
       775
       48)
     object lblCopyHint: TLabel
       Left = 8
       Top = 16
-      Width = 240
-      Height = 13
+      Width = 245
+      Height = 15
       Caption = 'Select text in the box and press Ctrl+C to copy.'
     end
     object btnClose: TButton
@@ -77,7 +73,6 @@ object FrmVSCodeLaunchError: TFrmVSCodeLaunchError
       Caption = 'Close'
       ModalResult = 1
       TabOrder = 0
-      ExplicitLeft = 880
     end
   end
 end

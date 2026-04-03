@@ -1,18 +1,18 @@
 ﻿unit OSCmdLineExecutor;
 interface
-uses Winapi.Windows,classes;
+uses Winapi.Windows, classes, System.SysUtils;
 
 type
   TOSCommandLineExecutor = class;
   TOSCmdLineOutputProc = procedure(sender:TOSCommandLineExecutor; const txt:string) of object;
 
-  
+
   /// <summary>
-  /// Runs a command line command and captures its stdout/stderr 
+  /// Runs a command line command and captures its stdout/stderr
   /// </summary>
   TOSCommandLineExecutor = class(TComponent)
   public
-    type TLogProc = reference to procedure(txt:string); 
+    type TLogProc = reference to procedure(txt:string);
   private
     type
        TPipeHandles = record
@@ -29,26 +29,25 @@ type
     procedure ClearPipe(var pipe:TPipeHandles);
     procedure InitPipe(var Pipe:TPipeHandles;SecAttr : TSecurityAttributes);
     procedure ClosePipe(var Pipe: TPipeHandles);
-    function ReadPipe(var Pipe: TPipeHandles):AnsiString;
+   function ReadPipe(var Pipe: TPipeHandles): string;
     procedure InitStartupInfo;
-    procedure LogOutput(var msg:AnsiString;IsError:boolean);
+   procedure LogOutput(var msg: string; IsError: Boolean);
   public
-    function Execute: DWORD; overload;                  
-    function Execute(StdErrProc,StdOutProc:TLogProc):DWORD; overload; 
-    function Execute(OutProc:TLogProc):DWORD; overload;               
+    function Execute: DWORD; overload;
+    function Execute(StdErrProc,StdOutProc:TLogProc):DWORD; overload;
+    function Execute(OutProc:TLogProc):DWORD; overload;
   published
     property OnStdOut : TOSCmdLineOutputProc read FOnStdOut write FOnStdOut;
     property OnStdErr : TOSCmdLineOutputProc read FOnStdErr write FOnStdErr;
-    property OnIdle : TNotifyEvent read FOnIdle write FOnIdle; 
-    property WorkDir:string read FWorkDir write FWorkDir; 
-    property CmdLine:string read FCmdLine write FCmdLine;    
+    property OnIdle : TNotifyEvent read FOnIdle write FOnIdle;
+    property WorkDir:string read FWorkDir write FWorkDir;
+    property CmdLine:string read FCmdLine write FCmdLine;
   end;
 
 
 procedure Register;
 
 implementation
-uses sysutils;
 
 const BufSize = $4000;
 
@@ -71,18 +70,28 @@ begin
   ClearPipe(Pipe);
 end;
 
-function TOSCommandLineExecutor.ReadPipe(var Pipe: TPipeHandles):AnsiString;
-var ReadBuf: array[0..BufSize] of AnsiChar;
-    BytesRead: Dword;
+function TOSCommandLineExecutor.ReadPipe(var Pipe: TPipeHandles): string;
+var
+   ReadBuf: TBytes;
+   BytesRead: DWORD;
+   OemEncoding: TEncoding;
 begin
-   result := '';
-   if not PeekNamedPipe(Pipe.hRead, nil, 0, nil, @BytesRead, nil) or (BytesRead <= 0) then exit;
+    Result := '';
+    if not PeekNamedPipe(Pipe.hRead, nil, 0, nil, @BytesRead, nil) or (BytesRead <= 0) then
+       Exit;
 
-   ReadFile( Pipe.hRead, ReadBuf, BufSize, BytesRead, nil);
-   if BytesRead <= 0 then exit;
+    SetLength(ReadBuf, BufSize);
+    ReadFile(Pipe.hRead, ReadBuf[0], BufSize, BytesRead, nil);
+    if BytesRead <= 0 then
+       Exit;
 
-   ReadBuf[BytesRead] := #0;
-   result := pAnsichar(@readbuf[0]);
+    SetLength(ReadBuf, BytesRead);
+    OemEncoding := TEncoding.GetEncoding(GetOEMCP);
+    try
+       Result := OemEncoding.GetString(ReadBuf);
+    finally
+       OemEncoding.Free;
+    end;
 end;
 
 
@@ -99,16 +108,17 @@ begin
 end;
 
 
-procedure TOSCommandLineExecutor.LogOutput(var msg:AnsiString;IsError:boolean);
-var newLinePosition:integer;
-    newLineSeparatorLength:integer;
+procedure TOSCommandLineExecutor.LogOutput(var msg: string; IsError: Boolean);
+var
+   newLinePosition: Integer;
+   newLineSeparatorLength: Integer;
 
     procedure LocateNewLineSeparator;
-    var p0,p1,p2:integer;
+      var p0,p1,p2: Integer;
     begin
-       p0 := pos(AnsiString(#13#10),msg);
-       p1 := pos(AnsiChar(#13),msg);
-       p2 := pos(AnsiChar(#10),msg);
+          p0 := Pos(#13#10, msg);
+          p1 := Pos(#13, msg);
+          p2 := Pos(#10, msg);
 
        if (p1 >= p0) and (p2 >= p0) then begin
           newLineSeparatorLength := 2;
@@ -120,13 +130,14 @@ var newLinePosition:integer;
           else if p1 < p2 then newLinePosition := p1
           else newLinePosition := p2;
        end;
-    end;
+   end;
 
-var s:String;
+var
+  s: string;
 begin
     LocateNewLineSeparator;
     while newLinePosition>=1 do begin
-       s := String(copy( msg,1,newLinePosition-1));
+      s := Copy(msg, 1, newLinePosition - 1);
 
        if IsError then begin
           if Assigned(FOnStdErr) then
@@ -142,7 +153,7 @@ begin
              FAnonProcStdOut(s);
        end;
 
-       msg := copy(msg,newLinePosition+newLineSeparatorLength,length(msg));
+         msg := Copy(msg, newLinePosition + newLineSeparatorLength, Length(msg));
        LocateNewLineSeparator;
     end;
 end;
@@ -153,15 +164,15 @@ function  TOSCommandLineExecutor.Execute(StdErrProc,StdOutProc:TLogProc):DWORD; 
 var SecAttr : TSecurityAttributes;
 
     function DoExecuteProcess:DWORD;
-    var  strError,strOut:AnsiString;
-         ProcessInformation:TProcessInformation;
+       var  strError, strOut: string;
+          ProcessInformation:TProcessInformation;
     begin
        if not CreateProcess(
                  nil, PChar(FCmdLine), nil, nil, True,
                  NORMAL_PRIORITY_CLASS or CREATE_NO_WINDOW,
                  nil, PChar(FWorkDir),
                  StartupInfo,
-                 ProcessInformation ) 
+                 ProcessInformation )
           then  Raise Exception.create('Cannot create process for '+FCmdLine+ #13#10+SysErrorMessage(GetLastError));
       result := STILL_ACTIVE;
 

@@ -37,9 +37,11 @@ begin
     editor := Module.ModuleFileEditors[i];
     if not Editor.Modified then
       continue;
-    exit(Module.Save(False, True));
+    Result := Module.Save(False, True);
+    Exit;
   end;
-  exit(true);
+  Result := True;
+  Exit;
 end;
 
 function SaveAllModules: boolean;
@@ -48,12 +50,13 @@ var
   I: Integer;
   Module: IOTAModule;
 begin
-  result := false;
   Services := BorlandIDEServices as IOTAModuleServices;
   for I := 0 to Services.ModuleCount - 1 do begin
     Module := Services.Modules[I];
-    if not SaveModule(Module) then
-      exit;
+    if not SaveModule(Module) then begin
+      Result := False;
+      Exit;
+    end;
   end;
   result := true;
 end;
@@ -71,7 +74,7 @@ begin
     var ext := ExtractFileExt(Result.FileName).toUpper;
     for var scan in FileExtensions do
       if scan = ext then
-        exit;
+        Exit;
   end;
 
   Result := nil;
@@ -113,7 +116,7 @@ begin
   if EditView <> nil then begin
     Result.Line := EditView.CursorPos.Line;
     Result.Column := EditView.CursorPos.Col;
-  end
+    end;
 end;
 
 function GetActiveProjectGroup: IOTAProjectGroup;
@@ -224,6 +227,7 @@ end;
 const
   PLUGIN_MANAGED_BY_FIELD = 'managedBy';
   PLUGIN_MANAGED_BY_VALUE = 'editinvscode-delphi-plugin';
+  PLUGIN_SETTINGS_MENU_CAPTION = 'Edit in VS Code Settings...';
 
 procedure MergeExtensionRecommendations(ExtensionsObject: TJSONObject);
 var
@@ -412,43 +416,49 @@ begin
 end;
 
 type
-  TVSCodeSearchData = record
+  TEditorWindowSearchData = record
     SearchTitle: string;
+    WindowClassName: string;
+    WindowTitleSuffix: string;
     FoundWindow: HWND;
   end;
-  PVSCodeSearchData = ^TVSCodeSearchData;
+  PEditorWindowSearchData = ^TEditorWindowSearchData;
 
-function VSCodeEnumWindowsCallback(Wnd: HWND; LParam: LPARAM): BOOL; stdcall;
+function EditorEnumWindowsCallback(Wnd: HWND; LParam: LPARAM): BOOL; stdcall;
 var
-  Data: PVSCodeSearchData;
+  Data: PEditorWindowSearchData;
   ClassName: array[0..127] of Char;
   Title: array[0..1023] of Char;
   TitleStr: string;
 begin
   Result := True;
-  if not IsWindowVisible(Wnd) then Exit;
+  if not IsWindowVisible(Wnd) then
+    Exit;
   // GetClassName is very fast (kernel data, no IPC):
   // immediately discard anything that is not Electron/Chromium before touching GetWindowText
   GetClassName(Wnd, ClassName, Length(ClassName));
-  if string(ClassName) <> 'Chrome_WidgetWin_1' then Exit;
-  Data := PVSCodeSearchData(LParam);
+  Data := PEditorWindowSearchData(LParam);
+  if (Data.WindowClassName <> '') and (string(ClassName) <> Data.WindowClassName) then
+    Exit;
   GetWindowText(Wnd, Title, Length(Title));
   TitleStr := string(Title);
-  if (Pos(Data.SearchTitle, TitleStr) > 0) and
-     (Pos('Visual Studio Code', TitleStr) > 0) then begin
-    Data.FoundWindow := Wnd;
-    Result := False; // found, stop enumeration
-  end;
+  if Pos(Data.SearchTitle, TitleStr) = 0 then
+    Exit;
+  if (Data.WindowTitleSuffix <> '') and (Pos(Data.WindowTitleSuffix, TitleStr) = 0) then
+    Exit;
+  Data.FoundWindow := Wnd;
+  Result := False; // found, stop enumeration
 end;
 
-// Searches for a VSCode window that already has the indicated workspace open,
+// Searches for an editor window that already has the indicated workspace open,
 // based on the workspace name in the window title.
-// Expected title: "WorkspaceName (Workspace) — Visual Studio Code"
-//             or: "FolderName — Visual Studio Code"
-function FindVSCodeWindow(const WorkspacePath: string): HWND;
+// Example titles:
+//   "WorkspaceName (Workspace) — Visual Studio Code"
+//   "FolderName — Cursor"
+function FindEditorWindow(const WorkspacePath, WindowClassName, WindowTitleSuffix: string): HWND;
 var
   WorkspaceName: string;
-  Data: TVSCodeSearchData;
+  Data: TEditorWindowSearchData;
 begin
   if WorkspacePath.EndsWith('.code-workspace', True) then
     WorkspaceName := ChangeFileExt(ExtractFileName(WorkspacePath), '')
@@ -456,8 +466,10 @@ begin
     WorkspaceName := ExtractFileName(ExcludeTrailingPathDelimiter(WorkspacePath));
 
   Data.SearchTitle := WorkspaceName;
+  Data.WindowClassName := WindowClassName;
+  Data.WindowTitleSuffix := WindowTitleSuffix;
   Data.FoundWindow := 0;
-  EnumWindows(@VSCodeEnumWindowsCallback, LPARAM(@Data));
+  EnumWindows(@EditorEnumWindowsCallback, LPARAM(@Data));
   Result := Data.FoundWindow;
 end;
 
@@ -532,19 +544,25 @@ begin
   Result := True;
 
   FormEditor := GetModuleFormEditor(CurrentModule);
-  if FormEditor = nil then Exit;
+  if FormEditor = nil then
+    Exit;
   RootComp := FormEditor.GetRootComponent;
-  if RootComp = nil then Exit;
+  if RootComp = nil then
+    Exit;
   // GetComponentType can crash if the form designer is not open: use INTAComponent
   var NTARootComp: INTAComponent;
-  if not Supports(RootComp, INTAComponent, NTARootComp) then Exit;
+  if not Supports(RootComp, INTAComponent, NTARootComp) then
+    Exit;
   var RootTComp := NTARootComp.GetComponent;
-  if RootTComp = nil then Exit;
+  if RootTComp = nil then
+    Exit;
   ParentClassName := RootTComp.ClassName;
-  if ParentClassName = '' then Exit;
+  if ParentClassName = '' then
+    Exit;
 
   Children := FindOpenChildForms(CurrentModule, ParentClassName);
-  if Length(Children) = 0 then Exit;
+  if Length(Children) = 0 then
+    Exit;
 
   var ChildList := '';
   for var Child in Children do
@@ -593,16 +611,98 @@ begin
   end;
 end;
 
-// Returns the configured VS Code executable, quoted only if the path contains spaces,
+function GetEffectiveEditorCommand(EditorSettings: TEditorSettings): string;
+begin
+  if EditorSettings = nil then
+    Exit;
+
+  Result := Trim(EditorSettings.Command);
+  if Result <> '' then
+    Exit;
+
+  var DefaultSettings := TPluginSettings.CreateDefaultBuiltInEditorCopy(EditorSettings.Id);
+  try
+    if DefaultSettings <> nil then
+      Result := DefaultSettings.Command;
+  finally
+    DefaultSettings.Free;
+  end;
+
+  if Result = '' then
+    Exit;
+end;
+
+function QuoteCommandArgument(const Value: string): string;
+begin
+  if Value = '' then
+  begin
+    Result := '""';
+    Exit;
+  end;
+
+  if Pos(' ', Value) > 0 then
+  begin
+    Result := '"' + Value + '"';
+    Exit;
+  end;
+
+  Result := Value;
+end;
+
+function ExpandEditorArgumentTemplate(const Template, WorkspacePath, FileName: string;
+  Line, Column: Integer): string;
+begin
+  Result := Template;
+  Result := StringReplace(Result, '{workspacePath}', QuoteCommandArgument(WorkspacePath), [rfReplaceAll]);
+  Result := StringReplace(Result, '{filePath}', QuoteCommandArgument(FileName), [rfReplaceAll]);
+  Result := StringReplace(Result, '{line}', IntToStr(Line), [rfReplaceAll]);
+  Result := StringReplace(Result, '{column}', IntToStr(Column), [rfReplaceAll]);
+
+  var GotoTarget := QuoteCommandArgument(FileName + ':' + IntToStr(Line) + ':' + IntToStr(Column));
+  Result := StringReplace(Result, '{gotoTarget}', GotoTarget, [rfReplaceAll]);
+end;
+
+function AppendArgumentBlock(const BaseArgs, ExtraArgs: string): string;
+begin
+  Result := Trim(BaseArgs);
+  var TrimmedExtraArgs := Trim(ExtraArgs);
+  if TrimmedExtraArgs = '' then
+    Exit;
+
+  if Result <> '' then
+    Result := Result + ' ';
+  Result := Result + TrimmedExtraArgs;
+end;
+
+function ResolveEditorLaunchArgs(EditorSettings: TEditorSettings; ReuseWindow: Boolean;
+  WorkspacePath, FileName: string; Line, Column: Integer; HasDelphiLsp: Boolean): string;
+begin
+  if ReuseWindow then begin
+    if Line < 0 then
+      Result := ExpandEditorArgumentTemplate(EditorSettings.ReuseOpenArgs, WorkspacePath, FileName, Line, Column)
+    else
+      Result := ExpandEditorArgumentTemplate(EditorSettings.ReuseGotoArgs, WorkspacePath, FileName, Line, Column);
+  end else begin
+    if Line < 0 then
+      Result := ExpandEditorArgumentTemplate(EditorSettings.NewOpenArgs, WorkspacePath, FileName, Line, Column)
+    else
+      Result := ExpandEditorArgumentTemplate(EditorSettings.NewGotoArgs, WorkspacePath, FileName, Line, Column);
+  end;
+
+  if HasDelphiLsp then
+    Result := AppendArgumentBlock(Result, EditorSettings.DelphiLspArgs);
+end;
+
+// Returns the configured editor executable, quoted only if the path contains spaces,
 // for safe embedding inside cmd /c "...".
 // Strips any user-supplied surrounding quotes before deciding.
-function QuotedVSCodeCommand: string;
+function QuotedEditorCommand(const EditorCommand: string): string;
 var
   cmd: string;
 begin
-  cmd := Trim(TPluginSettings.VSCodeCommand);
+  cmd := Trim(EditorCommand);
   if cmd = '' then
-    cmd := DEFAULT_VSCODE_COMMAND;
+    Exit;
   if (Length(cmd) >= 2) and (cmd[1] = '"') and (cmd[Length(cmd)] = '"') then
     cmd := Copy(cmd, 2, Length(cmd) - 2);
   if Pos(' ', cmd) > 0 then
@@ -611,11 +711,15 @@ begin
     Result := cmd;
 end;
 
-procedure ShowVSCodeLaunchError(const CmdLine, WorkDir, StdOutText, StdErrText,
-  ErrorKind, ErrorMessage: string; ExitCode: DWORD);
+procedure ShowEditorLaunchError(const EditorDisplayName, CmdLine, WorkDir, StdOutText,
+  StdErrText, ErrorKind, ErrorMessage: string; ExitCode: DWORD);
 begin
+  var DisplayName := Trim(EditorDisplayName);
+  if DisplayName = '' then
+    DisplayName := 'External editor';
+
   var Details :=
-    'Visual Studio Code could not be started.' + sLineBreak + sLineBreak +
+    DisplayName + ' could not be started.' + sLineBreak + sLineBreak +
     'Error kind: ' + ErrorKind + sLineBreak +
     'Original message: ' + ErrorMessage + sLineBreak +
     'Command line: ' + CmdLine + sLineBreak +
@@ -625,13 +729,18 @@ begin
     'STDERR:' + sLineBreak + StdErrText;
 
   TFrmVSCodeLaunchError.ShowDialog(
-    'Error starting Visual Studio Code',
-    'The plugin failed to launch Visual Studio Code. You can copy all details below.',
+    'Error starting ' + DisplayName,
+    'The plugin failed to launch ' + DisplayName + '. You can copy all details below.',
     Details);
 end;
 
-procedure OpenCurrentFileInVisualStudioCode;
+procedure OpenCurrentFileInEditor(EditorSettings: TEditorSettings);
 begin
+  if EditorSettings = nil then begin
+    ShowMessage('No editor configuration found');
+    Exit;
+  end;
+
   var sourceInfos: TCurrentSourceFileInfos;
   try
     sourceInfos := GetCurrentSourceFileInfos;
@@ -672,6 +781,23 @@ begin
   var FileNameCapture := FileName;
   var LineCapture := sourceInfos.Line;
   var ColCapture := sourceInfos.Column;
+  var EditorDisplayNameCapture := Trim(EditorSettings.DisplayName);
+  if EditorDisplayNameCapture = '' then
+    EditorDisplayNameCapture := 'External editor';
+  var EditorCommandCapture := GetEffectiveEditorCommand(EditorSettings);
+  if EditorCommandCapture = '' then begin
+    ShowMessage(
+      'No executable is configured for ' + EditorDisplayNameCapture + '.' + sLineBreak + sLineBreak +
+      'Open Tools > Options > Third Party > Edit in VS Code and use Advanced Settings to configure it.');
+    Exit;
+  end;
+  var EditorWindowClassNameCapture := EditorSettings.WindowClassName;
+  var EditorWindowTitleSuffixCapture := EditorSettings.WindowTitleSuffix;
+  var EditorReuseOpenArgsCapture := EditorSettings.ReuseOpenArgs;
+  var EditorReuseGotoArgsCapture := EditorSettings.ReuseGotoArgs;
+  var EditorNewOpenArgsCapture := EditorSettings.NewOpenArgs;
+  var EditorNewGotoArgsCapture := EditorSettings.NewGotoArgs;
+  var EditorDelphiLspArgsCapture := EditorSettings.DelphiLspArgs;
 
   // Check if the active project has a .delphilsp.json: if so, add
   // --command delphilsp.selectSettingsFile to trigger LSP reload
@@ -683,39 +809,59 @@ begin
   // EnumWindows and Execute run in background to avoid blocking the IDE
   TThread.CreateAnonymousThread(procedure
   var
-    VSCodeWindow: HWND;
+    EditorWindow: HWND;
     cmdline: string;
     quotedCmd: string;
-    DelphiLspCmd: string;
+    launchArgs: string;
     workDir: string;
     stdOutText: string;
     stdErrText: string;
     exitCode: DWORD;
+    EditorLaunchSettings: TEditorSettings;
   begin
     try
-      if HasDelphiLspCapture then
-        DelphiLspCmd := ' --command delphilsp.selectSettingsFile'
+      quotedCmd := QuotedEditorCommand(EditorCommandCapture);
+      EditorLaunchSettings := TEditorSettings.Create(
+        '', EditorDisplayNameCapture, '', True, EditorCommandCapture, 0,
+        EditorWindowClassNameCapture, EditorWindowTitleSuffixCapture,
+        EditorReuseOpenArgsCapture, EditorReuseGotoArgsCapture,
+        EditorNewOpenArgsCapture, EditorNewGotoArgsCapture,
+        EditorDelphiLspArgsCapture);
+      try
+      if Trim(EditorWindowTitleSuffixCapture) = '' then
+        EditorWindow := 0
       else
-        DelphiLspCmd := '';
-
-      quotedCmd := QuotedVSCodeCommand;
-      VSCodeWindow := FindVSCodeWindow(WorkspacePathCapture);
-      if VSCodeWindow <> 0 then begin
-        // VSCode window with this workspace already open: bring it to the front and reuse it
-        SetForegroundWindow(VSCodeWindow);
-        if LineCapture < 0 then
-          cmdline := Format('cmd /c "%s --reuse-window %s%s"', [quotedCmd, WorkspacePathCapture, DelphiLspCmd])
-        else
-          cmdline := Format('cmd /c "%s --reuse-window %s -g %s:%d:%d%s"',
-            [quotedCmd, WorkspacePathCapture, FileNameCapture, LineCapture, ColCapture, DelphiLspCmd]);
+        EditorWindow := FindEditorWindow(
+          WorkspacePathCapture,
+          EditorWindowClassNameCapture,
+          EditorWindowTitleSuffixCapture);
+      if EditorWindow <> 0 then begin
+        // Matching editor window with this workspace already open: bring it to the front and reuse it
+        SetForegroundWindow(EditorWindow);
+        launchArgs := ResolveEditorLaunchArgs(
+          EditorLaunchSettings,
+          True,
+          WorkspacePathCapture,
+          FileNameCapture,
+          LineCapture,
+          ColCapture,
+          HasDelphiLspCapture);
       end else begin
-        // No VSCode window found for this workspace: open a new instance
-        if LineCapture < 0 then
-          cmdline := Format('cmd /c "%s --new-window %s%s"', [quotedCmd, WorkspacePathCapture, DelphiLspCmd])
-        else
-          cmdline := Format('cmd /c "%s --new-window %s -g %s:%d:%d%s"',
-            [quotedCmd, WorkspacePathCapture, FileNameCapture, LineCapture, ColCapture, DelphiLspCmd]);
+        // No matching editor window found for this workspace: open a new instance
+        launchArgs := ResolveEditorLaunchArgs(
+          EditorLaunchSettings,
+          False,
+          WorkspacePathCapture,
+          FileNameCapture,
+          LineCapture,
+          ColCapture,
+          HasDelphiLspCapture);
       end;
+      finally
+        EditorLaunchSettings.Free;
+      end;
+
+      cmdline := Format('cmd /c "%s %s"', [quotedCmd, launchArgs]);
 
       workDir := ExtractFilePath(FileNameCapture);
       stdOutText := '';
@@ -750,13 +896,14 @@ begin
         TThread.Queue(nil,
           procedure
           begin
-            ShowVSCodeLaunchError(
+            ShowEditorLaunchError(
+              EditorDisplayNameCapture,
               cmdline,
               workDir,
               stdOutText,
               stdErrText,
               'ProcessExitCode',
-              'code command returned a non-zero exit code.',
+              'The editor command returned a non-zero exit code.',
               exitCode);
           end);
     except
@@ -764,7 +911,8 @@ begin
         TThread.Queue(nil,
           procedure
           begin
-            ShowVSCodeLaunchError(
+            ShowEditorLaunchError(
+              EditorDisplayNameCapture,
               cmdline,
               workDir,
               stdOutText,
@@ -777,14 +925,51 @@ begin
   end).Start;
 end;
 
+procedure OpenCurrentFileInVisualStudioCode;
+begin
+  OpenCurrentFileInEditor(TPluginSettings.BuiltInEditors[0]);
+end;
+
+function GetEnabledEditors: TArray<TEditorSettings>;
+begin
+  var EnabledEditors := TList<TEditorSettings>.Create;
+  try
+    for var Editor in TPluginSettings.BuiltInEditors do
+      if Editor.Enabled then
+        EnabledEditors.Add(Editor);
+
+    for var Editor in TPluginSettings.CustomEditors do
+      if Editor.Enabled then
+        EnabledEditors.Add(Editor);
+
+    Result := EnabledEditors.ToArray;
+  finally
+    EnabledEditors.Free;
+  end;
+end;
+
+procedure OpenPluginOptionsPage;
+begin
+  var EnvironmentOptions: IOTAEnvironmentOptions;
+  if Supports(BorlandIDEServices, IOTAEnvironmentOptions, EnvironmentOptions) then begin
+    EnvironmentOptions.EditOptions('Third Party', 'Edit in VS Code');
+    Exit;
+  end;
+
+  ShowMessage('Open Tools > Options > Third Party > Edit in VS Code to configure the plugin.');
+end;
+
 
 type
   TMenuHandler = class
   strict private
     Item: TMenuItem;
-    Action: TProc;
+    EditorSettings: TEditorSettings;
+    ExecuteProc: TProc;
+    MenuAction: TAction;
     procedure OnExecute(Sender: TObject);
     constructor Create(aCaption: string; aAction: TProc; aShortcut: string);
+    constructor CreateForEditor(aCaption: string; aEditorSettings: TEditorSettings; aShortcut: string);
   class var
     MenuHandlers: TObjectList<TMenuHandler>;
     FActionList: TActionList;
@@ -793,7 +978,10 @@ type
     procedure UpdateShortcut(AShortCut: TShortCut);
     class constructor Create;
     class destructor Destroy;
+    class procedure ClearMenuItems;
     class function AddMenuItem(NTAServices: INTAServices; aCaption: string; aAction: TProc; aShortcut: string = ''): TMenuHandler;
+    class function AddEditorMenuItem(NTAServices: INTAServices; aCaption: string; aEditorSettings: TEditorSettings;
+      aShortcut: string = ''): TMenuHandler;
   end;
 
   TMenuRegistrationHelper = class
@@ -813,32 +1001,42 @@ begin
 end;
 
 constructor TMenuHandler.Create(aCaption: string; aAction: TProc; aShortcut: string);
-var
-  MyAction: TAction;
 begin
   inherited Create;
-  Action := aAction;
-  MyAction := TAction.Create(FActionList);
-  MyAction.Caption := aCaption;
-  MyAction.OnExecute := OnExecute;
+  ExecuteProc := aAction;
+  MenuAction := TAction.Create(FActionList);
+  MenuAction.Caption := aCaption;
+  MenuAction.OnExecute := OnExecute;
 
   if aShortcut <> '' then
-    MyAction.ShortCut := TextToShortCut(aShortcut);
+    MenuAction.ShortCut := TextToShortCut(aShortcut);
 
   Item := TMenuItem.Create(nil);
-  Item.Action := MyAction;
+  Item.Action := MenuAction;
+end;
+
+constructor TMenuHandler.CreateForEditor(aCaption: string; aEditorSettings: TEditorSettings; aShortcut: string);
+begin
+  Create(aCaption, nil, aShortcut);
+  EditorSettings := aEditorSettings;
 end;
 
 destructor TMenuHandler.Destroy;
 begin
   FreeAndNil(Item);
+  FreeAndNil(MenuAction);
   inherited;
 end;
 
 procedure TMenuHandler.OnExecute(Sender: TObject);
 begin
-  if Assigned(Action) then
-    Action;
+  if EditorSettings <> nil then begin
+    OpenCurrentFileInEditor(EditorSettings);
+    Exit;
+  end;
+
+  if Assigned(ExecuteProc) then
+    ExecuteProc;
 end;
 
 procedure TMenuHandler.UpdateShortcut(AShortCut: TShortCut);
@@ -855,37 +1053,84 @@ begin
   NTAServices.AddActionMenu('ToolsMenu', nil, Result.Item, False, True);
 end;
 
-procedure TryRegisterMainMenuItem; forward;
+class function TMenuHandler.AddEditorMenuItem(NTAServices: INTAServices; aCaption: string;
+  aEditorSettings: TEditorSettings; aShortcut: string = ''): TMenuHandler;
+begin
+  Result := TMenuHandler.CreateForEditor(aCaption, aEditorSettings, aShortcut);
+  MenuHandlers.Add(Result);
+  NTAServices.AddActionMenu('ToolsMenu', nil, Result.Item, False, True);
+end;
+
+class procedure TMenuHandler.ClearMenuItems;
+begin
+  MenuHandlers.Clear;
+end;
+
+procedure TryRegisterMainMenuItems; forward;
+procedure RebuildMainMenuItems; forward;
 
 procedure TMenuRegistrationHelper.OnTimer(Sender: TObject);
 begin
-  TryRegisterMainMenuItem;
+  TryRegisterMainMenuItems;
 end;
 
 var
   GOpenVSCodeHandler: TMenuHandler = nil;
+  GSetupMenuHandler: TMenuHandler = nil;
+  GRegisteredMenuCount: Integer = 0;
   GOptions: TEditInVSCodeOptions = nil;
   GMenuRegistrationTimer: TTimer = nil;
   GMenuRegistrationHelper: TMenuRegistrationHelper = nil;
 
-procedure TryRegisterMainMenuItem;
+procedure TryRegisterMainMenuItems;
 var
   NTAServices: INTAServices;
 begin
-  if GOpenVSCodeHandler <> nil then
+  if GRegisteredMenuCount > 0 then
     Exit;
   if not Supports(BorlandIDEServices, INTAServices, NTAServices) then
     Exit;
   if (NTAServices.MainMenu = nil) or (NTAServices.MainMenu.Items.Count = 0) then
     Exit;
 
-  GOpenVSCodeHandler := TMenuHandler.AddMenuItem(
-    NTAServices,
-    'Edit in Visual Studio Code',
-    OpenCurrentFileInVisualStudioCode,
-    ShortCutToText(TPluginSettings.Shortcut));
+  var EnabledEditors := GetEnabledEditors;
+  if Length(EnabledEditors) = 0 then begin
+    GSetupMenuHandler := TMenuHandler.AddMenuItem(
+      NTAServices,
+      PLUGIN_SETTINGS_MENU_CAPTION,
+      OpenPluginOptionsPage);
+    Inc(GRegisteredMenuCount);
+    FreeAndNil(GMenuRegistrationTimer);
+    Exit;
+  end;
+
+  for var Editor in EnabledEditors do begin
+    var DisplayName := Trim(Editor.DisplayName);
+    if DisplayName = '' then
+      DisplayName := 'Custom Editor';
+
+    var MenuHandler := TMenuHandler.AddEditorMenuItem(
+      NTAServices,
+      'Edit in ' + DisplayName,
+      Editor,
+      ShortCutToText(Editor.Shortcut));
+
+    if SameText(Editor.Id, 'vscode') then
+      GOpenVSCodeHandler := MenuHandler;
+
+    Inc(GRegisteredMenuCount);
+  end;
 
   FreeAndNil(GMenuRegistrationTimer);
+end;
+
+procedure RebuildMainMenuItems;
+begin
+  TMenuHandler.ClearMenuItems;
+  GOpenVSCodeHandler := nil;
+  GSetupMenuHandler := nil;
+  GRegisteredMenuCount := 0;
+  TryRegisterMainMenuItems;
 end;
 
 procedure UnregisterOptions;
@@ -915,13 +1160,18 @@ begin
       if GOpenVSCodeHandler <> nil then
         GOpenVSCodeHandler.UpdateShortcut(sc);
     end;
+  TPluginSettings.OnSettingsChanged :=
+    procedure
+    begin
+      RebuildMainMenuItems;
+    end;
 
   GOptions := TEditInVSCodeOptions.Create;
   if Supports(BorlandIDEServices, INTAEnvironmentOptionsServices, OptionsServices) then
     OptionsServices.RegisterAddInOptions(GOptions);
 
-  TryRegisterMainMenuItem;
-  if GOpenVSCodeHandler = nil then begin
+  TryRegisterMainMenuItems;
+  if GRegisteredMenuCount = 0 then begin
     if GMenuRegistrationHelper = nil then
       GMenuRegistrationHelper := TMenuRegistrationHelper.Create;
     GMenuRegistrationTimer := TTimer.Create(nil);
