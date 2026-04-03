@@ -23,8 +23,7 @@ uses
   FrmSettingsFrame,
   PluginSettings,
   OSCmdLineExecutor,
-  Winapi.Windows,
-  WinApi.ShellAPI;
+  Winapi.Windows;
 
 
 // Returns true if the module was saved successfully (or it didn't need to be saved)

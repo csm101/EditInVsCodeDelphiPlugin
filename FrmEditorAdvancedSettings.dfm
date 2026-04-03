@@ -114,7 +114,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblWindowTitleSuffix: TLabel
       AlignWithMargins = True
       Left = 5
-      Top = 70
+      Top = 67
       Width = 606
       Height = 15
       Align = alTop
@@ -130,7 +130,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edWindowClassName: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 41
+      Top = 38
       Width = 606
       Height = 23
       Align = alTop
@@ -145,7 +145,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edWindowTitleSuffix: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 91
+      Top = 85
       Width = 606
       Height = 23
       Align = alTop
@@ -191,7 +191,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblReuseGotoArgs: TLabel
       AlignWithMargins = True
       Left = 5
-      Top = 70
+      Top = 67
       Width = 606
       Height = 15
       Align = alTop
@@ -207,7 +207,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblNewOpenArgs: TLabel
       AlignWithMargins = True
       Left = 5
-      Top = 120
+      Top = 114
       Width = 606
       Height = 15
       Align = alTop
@@ -223,7 +223,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblNewGotoArgs: TLabel
       AlignWithMargins = True
       Left = 5
-      Top = 170
+      Top = 161
       Width = 606
       Height = 15
       Align = alTop
@@ -239,7 +239,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblDelphiLspArgs: TLabel
       AlignWithMargins = True
       Left = 5
-      Top = 220
+      Top = 208
       Width = 606
       Height = 15
       Align = alTop
@@ -255,7 +255,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object lblArgsHint: TLabel
       AlignWithMargins = True
       Left = 22
-      Top = 270
+      Top = 255
       Width = 589
       Height = 45
       Margins.Left = 20
@@ -278,7 +278,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edReuseOpenArgs: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 41
+      Top = 38
       Width = 606
       Height = 23
       Align = alTop
@@ -293,7 +293,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edReuseGotoArgs: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 91
+      Top = 85
       Width = 606
       Height = 23
       Align = alTop
@@ -308,7 +308,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edNewOpenArgs: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 141
+      Top = 132
       Width = 606
       Height = 23
       Align = alTop
@@ -323,7 +323,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edNewGotoArgs: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 191
+      Top = 179
       Width = 606
       Height = 23
       Align = alTop
@@ -338,7 +338,7 @@ object FrmEditorAdvancedSettings: TFrmEditorAdvancedSettings
     object edDelphiLspArgs: TEdit
       AlignWithMargins = True
       Left = 5
-      Top = 241
+      Top = 226
       Width = 606
       Height = 23
       Align = alTop

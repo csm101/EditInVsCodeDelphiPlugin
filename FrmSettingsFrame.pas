@@ -55,6 +55,7 @@ type
     btnAddCustomEditor: TButton;
     lblBuiltInHint: TLabel;
     lblCustomEditorsHint: TLabel;
+    lnkProjectHome: TLinkLabel;
     sbCustomEditors: TScrollBox;
     Label1: TLabel;
     Label2: TLabel;

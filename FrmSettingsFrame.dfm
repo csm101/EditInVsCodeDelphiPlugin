@@ -250,4 +250,15 @@ object FrmSettingsFrame: TFrmSettingsFrame
     TabOrder = 21
     OnClick = btnAddCustomEditorClick
   end
+  object lnkProjectHome: TLinkLabel
+    Left = 16
+    Top = 478
+    Width = 162
+    Height = 19
+    Caption = 
+      '<a href="https://github.com/csm101/EditInVsCodeDelphiPlugin">Pro' +
+      'ject home page on GitHub</a>'
+    TabOrder = 22
+    OnLinkClick = HomePageLinkClick
+  end
 end

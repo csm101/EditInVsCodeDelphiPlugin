@@ -1,21 +1,24 @@
 # Edit in Visual Studio Code (Delphi Plugin)
 
+> [!NOTE]
+> Although most of this README focuses on Visual Studio Code itself, the plugin can also be configured to work with other editors built on the same VS Code/Electron foundation, including Cursor, Windsurf, TRAE, and VSCodium. A dedicated section later in this document explains how to enable and configure those editors.
+
 If you want to use GitHub Copilot or the Delphi LSP extension while working on Delphi code, this plugin makes the RAD Studio to Visual Studio Code round-trip much smoother.
 
-This plugin adds a "Tools->Edit in Visual Studio Code" command to RAD Studio.
+By default, this plugin adds a "Tools->Edit in Visual Studio Code" command to RAD Studio. When additional supported editors are enabled in the plugin settings, matching menu entries such as "Edit in Cursor" or "Edit in Windsurf" are added as well.
 
 Terminology note:
 
-1. "Visual Studio Code" (or "VS Code") is the external editor used by this plugin.
+1. "Visual Studio Code" (or "VS Code") is the primary external editor used by this plugin and the main focus of this README.
 2. "RAD Studio" (Delphi IDE) is the Embarcadero IDE where this plugin is installed.
 
-In this document, "Visual Studio" always means "Visual Studio Code".
+In the sections below, references to Visual Studio Code also apply conceptually to supported editor forks unless stated otherwise.
 
 When you use that command, the plugin will:
 
 1. Save all modified files currently open in the IDE.
-2. Open the current Delphi source file in Visual Studio Code at the exact line and column you were editing in RAD Studio.
-3. Reuse an existing Visual Studio Code window when possible, instead of opening duplicate editors for the same workspace.
+2. Open the current Delphi source file in the selected external editor at the exact line and column you were editing in RAD Studio.
+3. Reuse an existing matching editor window when possible, instead of opening duplicate editors for the same workspace.
 
 The plugin settings are available in Delphi under Tools->Options->Third Party->Edit in VS Code.
 
@@ -24,12 +27,13 @@ The plugin settings are available in Delphi under Tools->Options->Third Party->E
 The latest version adds several practical improvements:
 
 1. Full Project Group support: when a Delphi project group is active, the plugin now generates and opens an equivalent VS Code workspace for the whole group, not just a single project folder.
-2. Configurable launch behavior: both the keyboard shortcut and the VS Code launch command are now configurable from Tools->Options->Third Party->Edit in VS Code.
-3. Smarter instance reuse: the plugin now searches for a VS Code window already associated with the current workspace before reusing it, instead of reusing a generic instance.
-4. Non-destructive settings generation: VS Code settings and extension recommendations are merged instead of overwritten, preserving user customizations.
-5. Automatic Delphi workspace cleanup defaults: the plugin configures `files.exclude` with common Delphi output/history patterns (`**/Debug`, `**/Release`, `**/Win32/Debug`, `**/Win32/Release`, `**/Win64/Debug`, `**/Win64/Release`, `**/__recovery`, `**/__history`, `**/.#*`, `**/*.rc`, `**/*.res`, `**/*.RES`, `**/*.bak`, `**/*.BAK`).
-6. Better launch diagnostics: startup failures now show a detailed, copyable error dialog with command line, working directory, exit code, stdout, and stderr.
-7. Better Delphi form workflow support: the plugin warns when child forms are open and handles the most common IDE edge cases before switching to VS Code.
+2. Multi-editor profiles: built-in profiles are now available for Visual Studio Code, Cursor, Windsurf, TRAE, and VSCodium, with optional custom editor entries for other compatible forks.
+3. Configurable launch behavior: each enabled editor can now have its own shortcut, launch command, and advanced command-line settings from Tools->Options->Third Party->Edit in VS Code.
+4. Smarter instance reuse: the plugin now searches for an editor window already associated with the current workspace before reusing it, instead of reusing a generic instance.
+5. Non-destructive settings generation: VS Code settings and extension recommendations are merged instead of overwritten, preserving user customizations.
+6. Automatic Delphi workspace cleanup defaults: the plugin configures `files.exclude` with common Delphi output/history patterns (`**/Debug`, `**/Release`, `**/Win32/Debug`, `**/Win32/Release`, `**/Win64/Debug`, `**/Win64/Release`, `**/__recovery`, `**/__history`, `**/.#*`, `**/*.rc`, `**/*.res`, `**/*.RES`, `**/*.bak`, `**/*.BAK`).
+7. Better launch diagnostics: startup failures now show a detailed, copyable error dialog with command line, working directory, exit code, stdout, and stderr.
+8. Better Delphi form workflow support: the plugin warns when child forms are open and handles the most common IDE edge cases before switching to the external editor.
 
 ## Release Notes
 
@@ -37,15 +41,17 @@ The latest version adds several practical improvements:
 
 1. Project Group-aware workflow with automatic generation/update of `.code-workspace` files.
 2. Settings page integrated in Delphi Tools->Options under Third Party->Edit in VS Code.
-3. Persistent plugin settings (`%APPDATA%\EditInVSCode\settings.json`) for launch command and shortcut.
-4. Dedicated VS Code launch error dialog with copyable diagnostics.
-5. Child form detection and warning dialog before opening files externally.
-6. Automatic `files.exclude` defaults for common Delphi build/output/history artifacts (`Debug/Release`, `Win32/Win64`, `__recovery`, `__history`, `.rc/.res/.bak`, and temporary lock-like files).
+3. Built-in editor profiles for Visual Studio Code, Cursor, Windsurf, TRAE, and VSCodium.
+4. Custom editor support for other VS Code-compatible editors.
+5. Persistent plugin settings (`%APPDATA%\EditInVSCode\settings.json`) for editor profiles, launch commands, and shortcuts.
+6. Dedicated launch error dialog with copyable diagnostics.
+7. Child form detection and warning dialog before opening files externally.
+8. Automatic `files.exclude` defaults for common Delphi build/output/history artifacts (`Debug/Release`, `Win32/Win64`, `__recovery`, `__history`, `.rc/.res/.bak`, and temporary lock-like files).
 
 ### Changed
 
-1. Menu command renamed to "Tools->Edit in Visual Studio Code" and aligned with settings naming.
-2. VS Code window reuse strategy improved to target the window matching the current workspace.
+1. Menu commands are now generated from the list of enabled editor profiles.
+2. Editor window reuse strategy improved to target the window matching the current workspace.
 3. VS Code configuration generation changed from overwrite to merge behavior for folders, settings, and recommendations.
 4. Shortcut handling updated to reflect runtime setting changes without requiring IDE restart.
 
@@ -144,6 +150,67 @@ This is a practical example of using agent mode for full end-to-end maintenance:
 You will also need the Copilot extensions:
 
 ![copilot extension](https://github.com/csm101/EditInVsCodeDelphiPlugin/assets/5736859/aa9473a4-ce94-4130-8007-845112bdf1d1)
+
+## How to Configure Other Supported Editors
+
+The plugin is still primarily documented around Visual Studio Code, because that is the default configuration and the most common setup. However, the settings page can also expose additional editors based on the same general platform.
+
+Built-in profiles are currently available for:
+
+1. Visual Studio Code
+2. Cursor
+3. Windsurf
+4. TRAE
+5. VSCodium
+
+You can also add your own custom profile for another compatible editor.
+
+### Enable a Built-In Editor Profile
+
+1. In RAD Studio, open Tools->Options->Third Party->Edit in VS Code.
+2. Enable the editor you want to expose in the Tools menu.
+3. Assign a shortcut if you want one.
+4. Click OK.
+
+After saving, the plugin rebuilds its menu entries and adds commands such as "Edit in Cursor" or "Edit in VSCodium" for the enabled profiles.
+
+### Add a Custom Editor Profile
+
+1. Open Tools->Options->Third Party->Edit in VS Code.
+2. Click Add Custom Editor.
+3. Give the new profile a clear display name.
+4. Open Customize/Advanced Settings for that profile.
+5. Enter the executable command or full path.
+6. Save the settings and enable the profile.
+
+This is useful for editors that are not shipped as built-in profiles but still follow the same general command-line and windowing model as VS Code.
+
+### Advanced Settings Explained
+
+Each editor profile can be customized through the Advanced Settings dialog. The most relevant fields are:
+
+1. Command or executable path.
+2. Window class name.
+3. Window title suffix used to detect an already open instance.
+4. Reuse/open command-line templates.
+5. Extra arguments to append when a `.delphilsp.json` file exists.
+
+The command-line templates support these placeholders:
+
+1. `{workspacePath}`
+2. `{filePath}`
+3. `{gotoTarget}`
+4. `{line}`
+5. `{column}`
+
+For the built-in profiles, you can use Reset to Default in the advanced dialog to restore the shipped settings.
+
+### Practical Notes for Non-VS-Code Editors
+
+1. The README examples below still use Visual Studio Code, but the plugin workflow is the same for the supported forks.
+2. Some editor forks may not support every VS Code command-line flag exactly the same way, so advanced settings exist to let you adjust them.
+3. If you rely on the DelphiLSP extension, verify that the target editor supports the same extension and command invocation model you use in Visual Studio Code.
+4. Only enabled editor profiles are shown in the Tools menu.
 
 ## How to Enable Copilot
 
