@@ -172,6 +172,9 @@ You can also add your own custom profile for another compatible editor.
 3. Assign a shortcut if you want one.
 4. Click OK.
 
+<img width="1099" height="892" alt="image" src="https://github.com/user-attachments/assets/bec6e3d5-7896-4b28-bf58-cde2977fadef" />
+
+
 After saving, the plugin rebuilds its menu entries and adds commands such as "Edit in Cursor" or "Edit in VSCodium" for the enabled profiles.
 
 ### Add a Custom Editor Profile
