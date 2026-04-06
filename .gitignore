@@ -41,3 +41,4 @@ Linux64/
 Win32/
 Win64/
 TMSWEB/
+*.tmp

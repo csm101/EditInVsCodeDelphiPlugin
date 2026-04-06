@@ -86,36 +86,31 @@ type
     Column: Integer;
   end;
 
-function GetCurrentSourceFileInfos: TCurrentSourceFileInfos;
+function TryGetCurrentSourceFileInfos(out FileInfos: TCurrentSourceFileInfos): Boolean;
 var
   EditView: IOTAEditView;
 begin
-  var Services := BorlandIDEServices as IOTAModuleServices;
+  FileInfos.FileName := '';
+  FileInfos.Line := -1;
+  FileInfos.Column := -1;
 
-  var Module := Services.CurrentModule;
+  var Module := (BorlandIDEServices as IOTAModuleServices).CurrentModule;
   if Module = nil then
-    raise Exception.Create('Current module not found');
+    Exit(False);
 
-  var editor := FindSourceEditor(Module, ['.PAS', '.DPR', '.INC', '.DPK', '.DFM', '.FMX']);
+  var Editor := FindSourceEditor(Module, ['.PAS', '.DPR', '.INC', '.DPK', '.DFM', '.FMX']);
+  if Editor = nil then
+    Exit(False);
+  if Editor.EditViewCount = 0 then
+    Exit(False);
 
-  if editor = nil then
-    raise Exception.Create(
-      'The active tab is not a Delphi source editor. ' +
-      'Select a .pas/.dpr/.inc/.dpk/.dfm/.fmx file and try again.');
-  if editor.EditViewCount = 0 then
-    raise Exception.Create(
-      'The source editor is not visible. ' +
-      'Open the code editor tab and try again.');
-
-  Result.FileName := editor.FileName;
-  result.Line := -1;
-  result.Column := -1;
-
-  EditView := editor.GetEditView(0);
+  FileInfos.FileName := Editor.FileName;
+  EditView := Editor.GetEditView(0);
   if EditView <> nil then begin
-    Result.Line := EditView.CursorPos.Line;
-    Result.Column := EditView.CursorPos.Col;
-    end;
+    FileInfos.Line := EditView.CursorPos.Line;
+    FileInfos.Column := EditView.CursorPos.Col;
+  end;
+  Result := True;
 end;
 
 function GetActiveProjectGroup: IOTAProjectGroup;
@@ -733,6 +728,36 @@ begin
     Details);
 end;
 
+function TryGetActiveProjectSourceFile(out FileName: string): Boolean;
+var
+  Project: IOTAProject;
+  Editor: IOTASourceEditor;
+begin
+  Result := False;
+  FileName := '';
+  Project := (BorlandIDEServices as IOTAModuleServices).GetActiveProject;
+  if Project = nil then
+    Exit;
+
+  // First: try to find the .dpr/.dpk editor if it is already open in the IDE
+  Editor := FindSourceEditor(Project, ['.DPR', '.DPK']);
+  if Editor <> nil then begin
+    FileName := Editor.FileName;
+    Result := FileName <> '';
+    Exit;
+  end;
+
+  // Fallback: derive the source filename from the .dproj path (the editor may not be open)
+  for var Ext in ['.dpr', '.dpk'] do begin
+    var Candidate := ChangeFileExt(Project.FileName, Ext);
+    if TFile.Exists(Candidate) then begin
+      FileName := Candidate;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 procedure OpenCurrentFileInEditor(EditorSettings: TEditorSettings);
 begin
   if EditorSettings = nil then begin
@@ -741,11 +766,16 @@ begin
   end;
 
   var sourceInfos: TCurrentSourceFileInfos;
-  try
-    sourceInfos := GetCurrentSourceFileInfos;
-  except
-    on E: Exception do begin
-      ShowMessage(E.Message);
+  if not TryGetCurrentSourceFileInfos(sourceInfos) then begin
+    var fallbackFile: string;
+    if TryGetActiveProjectSourceFile(fallbackFile) then begin
+      sourceInfos.FileName := fallbackFile;
+      sourceInfos.Line := 1;  // force goto args so {gotoTarget}/{filePath} are passed to the editor
+      sourceInfos.Column := 1;
+    end else begin
+      ShowMessage(
+        'The active tab is not a Delphi source editor. ' +
+        'Select a .pas/.dpr/.inc/.dpk/.dfm/.fmx file and try again.');
       Exit;
     end;
   end;
