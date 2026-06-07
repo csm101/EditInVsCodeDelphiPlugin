@@ -48,6 +48,11 @@ type
     hkWindsurfShortcut: THotKey;
     btnWindsurfClearShortcut: TButton;
     btnWindsurfAdvanced: TButton;
+    chkDevinEnabled: TCheckBox;
+    lnkDevinHome: TLinkLabel;
+    hkDevinShortcut: THotKey;
+    btnDevinClearShortcut: TButton;
+    btnDevinAdvanced: TButton;
     chkTraeEnabled: TCheckBox;
     lnkTraeHome: TLinkLabel;
     hkTraeShortcut: THotKey;
@@ -68,6 +73,7 @@ type
     Label3: TLabel;
     Label4: TLabel;
     Label5: TLabel;
+    Label6: TLabel;
     procedure BuiltInAdvancedSettingsClick(Sender: TObject);
     procedure btnAddCustomEditorClick(Sender: TObject);
     procedure BuiltInClearShortcutClick(Sender: TObject);
@@ -161,6 +167,8 @@ begin
     EditorDraft := FindBuiltInEditorDraft('cursor')
   else if Sender = btnWindsurfAdvanced then
     EditorDraft := FindBuiltInEditorDraft('windsurf')
+  else if Sender = btnDevinAdvanced then
+    EditorDraft := FindBuiltInEditorDraft('devin')
   else if Sender = btnTraeAdvanced then
     EditorDraft := FindBuiltInEditorDraft('trae')
   else if Sender = btnVSCodiumAdvanced then
@@ -197,6 +205,8 @@ begin
     hkCursorShortcut.HotKey := 0
   else if Sender = btnWindsurfClearShortcut then
     hkWindsurfShortcut.HotKey := 0
+  else if Sender = btnDevinClearShortcut then
+    hkDevinShortcut.HotKey := 0
   else if Sender = btnTraeClearShortcut then
     hkTraeShortcut.HotKey := 0
   else if Sender = btnVSCodiumClearShortcut then
@@ -329,6 +339,7 @@ begin
   LoadBuiltInEditorControl('vscode', chkVSCodeEnabled, hkVSCodeShortcut);
   LoadBuiltInEditorControl('cursor', chkCursorEnabled, hkCursorShortcut);
   LoadBuiltInEditorControl('windsurf', chkWindsurfEnabled, hkWindsurfShortcut);
+  LoadBuiltInEditorControl('devin', chkDevinEnabled, hkDevinShortcut);
   LoadBuiltInEditorControl('trae', chkTraeEnabled, hkTraeShortcut);
   LoadBuiltInEditorControl('vscodium', chkVSCodiumEnabled, hkVSCodiumShortcut);
 end;
@@ -499,6 +510,7 @@ begin
   SaveBuiltInEditorControl('vscode', chkVSCodeEnabled, hkVSCodeShortcut);
   SaveBuiltInEditorControl('cursor', chkCursorEnabled, hkCursorShortcut);
   SaveBuiltInEditorControl('windsurf', chkWindsurfEnabled, hkWindsurfShortcut);
+  SaveBuiltInEditorControl('devin', chkDevinEnabled, hkDevinShortcut);
   SaveBuiltInEditorControl('trae', chkTraeEnabled, hkTraeShortcut);
   SaveBuiltInEditorControl('vscodium', chkVSCodiumEnabled, hkVSCodiumShortcut);
 end;
