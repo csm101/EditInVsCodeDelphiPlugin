@@ -318,7 +318,7 @@ end;
 
 class procedure TPluginSettings.AddDefaultBuiltInEditors;
 begin
-  for var EditorId in ['vscode', 'cursor', 'windsurf', 'trae', 'vscodium'] do
+  for var EditorId in ['vscode', 'cursor', 'windsurf', 'devin', 'trae', 'vscodium'] do
     FBuiltInEditors.Add(CreateDefaultBuiltInEditorCopy(EditorId));
 end;
 
@@ -372,6 +372,13 @@ begin
     Result := CreateBuiltInEditor(
       'windsurf', 'Windsurf', 'https://windsurf.com/editor',
       'windsurf', 'Windsurf', False, 0);
+    Exit;
+  end;
+
+  if SameText(EditorId, 'devin') then begin
+    Result := CreateBuiltInEditor(
+      'devin', 'Devin Desktop', 'https://devin.ai/desktop',
+      'devin', 'Devin', False, 0);
     Exit;
   end;
 

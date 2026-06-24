@@ -2,7 +2,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
   Left = 0
   Top = 0
   Width = 611
-  Height = 511
+  Height = 569
   TabOrder = 0
   object lblBuiltInHint: TLabel
     Left = 16
@@ -15,7 +15,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
   end
   object lblCustomEditorsHint: TLabel
     Left = 16
-    Top = 319
+    Top = 377
     Width = 332
     Height = 30
     Caption =
@@ -53,6 +53,13 @@ object FrmSettingsFrame: TFrmSettingsFrame
   object Label5: TLabel
     Left = 52
     Top = 282
+    Width = 38
+    Height = 15
+    Caption = 'Hotkey'
+  end
+  object Label6: TLabel
+    Left = 52
+    Top = 340
     Width = 38
     Height = 15
     Caption = 'Hotkey'
@@ -191,119 +198,163 @@ object FrmSettingsFrame: TFrmSettingsFrame
     TabOrder = 12
     OnClick = BuiltInAdvancedSettingsClick
   end
-  object chkTraeEnabled: TCheckBox
+  object chkDevinEnabled: TCheckBox
     Left = 16
     Top = 196
     Width = 121
     Height = 17
-    Caption = 'TRAE'
-    TabOrder = 12
+    Caption = 'Devin Desktop'
+    TabOrder = 13
   end
-  object lnkTraeHome: TLinkLabel
+  object lnkDevinHome: TLinkLabel
     Left = 152
     Top = 196
-    Width = 71
+    Width = 100
     Height = 19
-    Caption = '<a href="https://www.trae.ai/">www.trae.ai/</a>'
-    TabOrder = 13
+    Caption = '<a href="https://devin.ai/desktop">devin.ai/desktop</a>'
+    TabOrder = 14
     OnLinkClick = HomePageLinkClick
   end
-  object hkTraeShortcut: THotKey
+  object hkDevinShortcut: THotKey
     Left = 94
     Top = 221
     Width = 105
     Height = 23
     HotKey = 0
     Modifiers = []
-    TabOrder = 14
+    TabOrder = 15
   end
-  object btnTraeClearShortcut: TButton
+  object btnDevinClearShortcut: TButton
     Left = 205
     Top = 219
     Width = 44
     Height = 25
     Caption = 'Clear'
-    TabOrder = 15
+    TabOrder = 16
     OnClick = BuiltInClearShortcutClick
   end
-  object btnTraeAdvanced: TButton
+  object btnDevinAdvanced: TButton
     Left = 255
     Top = 219
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 16
+    TabOrder = 17
     OnClick = BuiltInAdvancedSettingsClick
   end
-  object chkVSCodiumEnabled: TCheckBox
+  object chkTraeEnabled: TCheckBox
     Left = 16
     Top = 254
     Width = 121
     Height = 17
-    Caption = 'VSCodium'
-    TabOrder = 16
+    Caption = 'TRAE'
+    TabOrder = 18
   end
-  object lnkVSCodiumHome: TLinkLabel
+  object lnkTraeHome: TLinkLabel
     Left = 152
     Top = 254
-    Width = 88
+    Width = 71
     Height = 19
-    Caption = '<a href="https://vscodium.com/">vscodium.com/</a>'
-    TabOrder = 17
+    Caption = '<a href="https://www.trae.ai/">www.trae.ai/</a>'
+    TabOrder = 19
     OnLinkClick = HomePageLinkClick
   end
-  object hkVSCodiumShortcut: THotKey
+  object hkTraeShortcut: THotKey
     Left = 94
     Top = 279
     Width = 105
     Height = 23
     HotKey = 0
     Modifiers = []
-    TabOrder = 18
+    TabOrder = 20
   end
-  object btnVSCodiumClearShortcut: TButton
+  object btnTraeClearShortcut: TButton
     Left = 205
     Top = 277
     Width = 44
     Height = 25
     Caption = 'Clear'
-    TabOrder = 19
+    TabOrder = 21
     OnClick = BuiltInClearShortcutClick
   end
-  object btnVSCodiumAdvanced: TButton
+  object btnTraeAdvanced: TButton
     Left = 255
     Top = 277
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 20
+    TabOrder = 22
+    OnClick = BuiltInAdvancedSettingsClick
+  end
+  object chkVSCodiumEnabled: TCheckBox
+    Left = 16
+    Top = 312
+    Width = 121
+    Height = 17
+    Caption = 'VSCodium'
+    TabOrder = 23
+  end
+  object lnkVSCodiumHome: TLinkLabel
+    Left = 152
+    Top = 312
+    Width = 88
+    Height = 19
+    Caption = '<a href="https://vscodium.com/">vscodium.com/</a>'
+    TabOrder = 24
+    OnLinkClick = HomePageLinkClick
+  end
+  object hkVSCodiumShortcut: THotKey
+    Left = 94
+    Top = 337
+    Width = 105
+    Height = 23
+    HotKey = 0
+    Modifiers = []
+    TabOrder = 25
+  end
+  object btnVSCodiumClearShortcut: TButton
+    Left = 205
+    Top = 335
+    Width = 44
+    Height = 25
+    Caption = 'Clear'
+    TabOrder = 26
+    OnClick = BuiltInClearShortcutClick
+  end
+  object btnVSCodiumAdvanced: TButton
+    Left = 255
+    Top = 335
+    Width = 130
+    Height = 25
+    Caption = 'Advanced Settings...'
+    TabOrder = 27
     OnClick = BuiltInAdvancedSettingsClick
   end
   object sbCustomEditors: TScrollBox
     Left = 16
-    Top = 352
+    Top = 410
     Width = 580
     Height = 116
-    TabOrder = 21
+    TabOrder = 28
   end
   object btnAddCustomEditor: TButton
     Left = 426
-    Top = 474
+    Top = 532
     Width = 170
     Height = 25
     Caption = 'Add Custom Editor...'
-    TabOrder = 22
+    TabOrder = 29
     OnClick = btnAddCustomEditorClick
   end
   object lnkProjectHome: TLinkLabel
     Left = 16
-    Top = 478
+    Top = 536
     Width = 162
     Height = 19
     Caption =
       '<a href="https://github.com/csm101/EditInVsCodeDelphiPlugin">Pro' +
       'ject home page on GitHub</a>'
-    TabOrder = 23
+    TabOrder = 30
     OnLinkClick = HomePageLinkClick
   end
 end
