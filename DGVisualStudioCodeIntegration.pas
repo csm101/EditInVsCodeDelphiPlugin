@@ -415,6 +415,42 @@ begin
   Result := Copy(BaseKey, SeparatorPos + 1, MaxInt);
 end;
 
+function ExpandDelphiMacros(const APath: string): string; forward;
+
+// User-defined IDE macros (Tools > Options > Environment Variables), which live
+// only in the IDE's registry hive and are NOT necessarily in the process
+// environment. Library and browsing paths routinely refer to them, and an entry
+// whose macro does not expand is discarded, so without this the directory is
+// silently never searched.
+function GetIdeEnvironmentVariable(const AName: string): string;
+begin
+  Result := '';
+  var BaseKey := GetDelphiBaseRegistryKey;
+  if BaseKey = '' then
+    Exit;
+  var Reg := TRegistry.Create(KEY_READ);
+  try
+    Reg.RootKey := HKEY_CURRENT_USER;
+    if Reg.OpenKeyReadOnly(BaseKey + '\Environment Variables') then
+      try
+        if Reg.ValueExists(AName) then
+          Result := Reg.ReadString(AName);
+      finally
+        Reg.CloseKey;
+      end;
+  finally
+    Reg.Free;
+  end;
+end;
+
+// Guards the mutual recursion between macro expansion and this fallback. An IDE
+// variable may be defined in terms of others, and self-reference is normal:
+// the IDE ships PATH = "$(PUBLIC)\...;$(PATH)". Depth-limited rather than
+// cycle-detecting, because the caller already discards anything still holding
+// an unexpanded macro.
+threadvar
+  GMacroExpansionDepth: Integer;
+
 function ResolveDelphiMacroFallback(const AMacroName: string): string;
 begin
   Result := '';
@@ -439,6 +475,16 @@ begin
     if BdsDir = '' then
       Exit;
     Exit(TPath.Combine(BdsDir, 'lib'));
+  end;
+
+  Result := GetIdeEnvironmentVariable(AMacroName);
+  if (Result <> '') and Result.Contains('$(') and (GMacroExpansionDepth < 4) then begin
+    Inc(GMacroExpansionDepth);
+    try
+      Result := ExpandDelphiMacros(Result);
+    finally
+      Dec(GMacroExpansionDepth);
+    end;
   end;
 end;
 
@@ -728,8 +774,14 @@ begin
 end;
 
 // Collects all source search paths visible to Delphi for AProject:
-//   - project-level DCC_UnitSearchPath
-//   - global IDE Win64 library/search path from the BDS registry key
+//   - $(BDS)\source
+//   - project-level DCC_UnitSearchPath, for the ACTIVE build configuration
+//   - the IDE's global "Search Path" for the project's platform (registry)
+//   - the IDE's global "Browsing Path" for that platform (registry)
+// There is deliberately no project-level browsing path: Delphi has none.
+// DCCStrs.pas declares Include/Obj/Resource/UnitSearch/Framework/Library and
+// nothing else, and no .dproj carries such a setting - it is an IDE-wide,
+// per-platform value only.
 // Returns a JSON array of forward-slash absolute paths ready for launch.json.
 function CollectSourceSearchPaths(AProject: IOTAProject): TJSONArray;
 var
@@ -809,6 +861,16 @@ begin
           try
             if Reg.ValueExists('Search Path') then
               AddSemicolonList(Reg.ReadString('Search Path'));
+            // The browsing path matters MORE than the search path here. Delphi
+            // uses the search path to find compiled units and the browsing path
+            // to find the SOURCES that go with them - which is exactly what a
+            // debugger needs to show you a line it has already resolved.
+            // Measured on one real installation: 89 of the 91 browsing entries
+            // appear nowhere in the search path, and 37 of those are
+            // third-party source trees. Without them the debugger resolves a
+            // frame in, say, a component library and then cannot display it.
+            if Reg.ValueExists('Browsing Path') then
+              AddSemicolonList(Reg.ReadString('Browsing Path'));
           finally
             Reg.CloseKey;
           end;
