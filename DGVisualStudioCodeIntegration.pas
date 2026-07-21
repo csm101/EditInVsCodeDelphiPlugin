@@ -841,11 +841,24 @@ begin
     if BdsDir <> '' then
       AddPath(BdsDir + '\source');
 
-    // Project-level unit search path. Read through GetProjectOptionValue so the
-    // ACTIVE build configuration wins: the raw IOTAProjectOptions getter returns
-    // the project-wide value and misses per-configuration overrides.
-    if AProject <> nil then
+    // Project-level paths. Read through GetProjectOptionValue so the ACTIVE
+    // build configuration wins: the raw IOTAProjectOptions getter returns the
+    // project-wide value and misses per-configuration overrides.
+    //
+    // The include path belongs here as much as the unit search path does. Code
+    // inside a `{$I foo.inc}` is attributed to foo.inc in the line table, not to
+    // the unit that includes it - one real project's map carries 654 such
+    // references - so stopping on such a line means the debugger has to find the
+    // .inc on disk, and this is where it is declared.
+    //
+    // Of the six path options Delphi declares per project (DCCStrs.pas:
+    // Include/Obj/Resource/UnitSearch/Framework/Library), these two are the only
+    // ones that name SOURCE directories; the rest point at .obj, .res,
+    // frameworks and libraries. There is no per-project browsing path.
+    if AProject <> nil then begin
       AddSemicolonList(GetProjectOptionValue(AProject, sUnitSearchPath));
+      AddSemicolonList(GetProjectOptionValue(AProject, sIncludePath));
+    end;
 
     // Global library / source paths stored by the IDE in the registry, for the
     // platform the project actually builds for (PlatformName defaults to Win64).
