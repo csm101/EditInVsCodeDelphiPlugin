@@ -1,24 +1,24 @@
 object FrmSettingsFrame: TFrmSettingsFrame
   Left = 0
   Top = 0
-  Width = 611
-  Height = 569
+  Width = 634
+  Height = 654
   TabOrder = 0
   object lblBuiltInHint: TLabel
     Left = 16
     Top = 0
     Width = 505
     Height = 15
-    Caption =
+    Caption = 
       'Select the editor(s) that should appear in the Tools menu. Short' +
       'cuts take effect after clicking OK.'
   end
   object lblCustomEditorsHint: TLabel
-    Left = 16
-    Top = 377
+    Left = 18
+    Top = 462
     Width = 332
     Height = 30
-    Caption =
+    Caption = 
       'If your are using another code editor forked from Visual Studio,' +
       #13#10' you can configure it here:'
   end
@@ -64,6 +64,25 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Height = 15
     Caption = 'Hotkey'
   end
+  object lblDebuggerConfigHint: TLabel
+    Left = 38
+    Top = 403
+    Width = 499
+    Height = 31
+    AutoSize = False
+    Caption = 
+      'Writes .vscode/launch.json and tasks.json (and the workspace lau' +
+      'nch/tasks sections) for the delphi-win64 debugger. Uncheck to sk' +
+      'ip all debugger configuration.'
+    WordWrap = True
+  end
+  object Label7: TLabel
+    Left = 38
+    Top = 439
+    Width = 124
+    Height = 15
+    Caption = 'Requires this debugger:'
+  end
   object chkVSCodeEnabled: TCheckBox
     Left = 16
     Top = 22
@@ -77,7 +96,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Top = 22
     Width = 128
     Height = 19
-    Caption =
+    Caption = 
       '<a href="https://code.visualstudio.com/">code.visualstudio.com/<' +
       '/a>'
     TabOrder = 1
@@ -107,7 +126,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 4
+    TabOrder = 32
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkCursorEnabled: TCheckBox
@@ -151,7 +170,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
     Width = 130
     Height = 25
     Caption = 'Advanced Settings...'
-    TabOrder = 8
+    TabOrder = 33
     OnClick = BuiltInAdvancedSettingsClick
   end
   object chkWindsurfEnabled: TCheckBox
@@ -209,7 +228,7 @@ object FrmSettingsFrame: TFrmSettingsFrame
   object lnkDevinHome: TLinkLabel
     Left = 152
     Top = 196
-    Width = 100
+    Width = 92
     Height = 19
     Caption = '<a href="https://devin.ai/desktop">devin.ai/desktop</a>'
     TabOrder = 14
@@ -331,15 +350,15 @@ object FrmSettingsFrame: TFrmSettingsFrame
     OnClick = BuiltInAdvancedSettingsClick
   end
   object sbCustomEditors: TScrollBox
-    Left = 16
-    Top = 410
-    Width = 580
+    Left = 18
+    Top = 498
+    Width = 607
     Height = 116
     TabOrder = 28
   end
   object btnAddCustomEditor: TButton
-    Left = 426
-    Top = 532
+    Left = 455
+    Top = 620
     Width = 170
     Height = 25
     Caption = 'Add Custom Editor...'
@@ -347,14 +366,46 @@ object FrmSettingsFrame: TFrmSettingsFrame
     OnClick = btnAddCustomEditorClick
   end
   object lnkProjectHome: TLinkLabel
-    Left = 16
-    Top = 536
+    Left = 18
+    Top = 624
     Width = 162
     Height = 19
-    Caption =
+    Caption = 
       '<a href="https://github.com/csm101/EditInVsCodeDelphiPlugin">Pro' +
       'ject home page on GitHub</a>'
     TabOrder = 30
+    OnLinkClick = HomePageLinkClick
+  end
+  object chkGenerateDebuggerConfig: TCheckBox
+    Left = 18
+    Top = 382
+    Width = 193
+    Height = 17
+    Caption = 'Generate debugger config'
+    Checked = True
+    State = cbChecked
+    TabOrder = 31
+    OnClick = chkGenerateDebuggerConfigClick
+  end
+  object chkGenerateAttachConfig: TCheckBox
+    Left = 220
+    Top = 382
+    Width = 300
+    Height = 17
+    Caption = 'Also generate an "Attach to..." configuration'
+    Checked = True
+    State = cbChecked
+    TabOrder = 32
+  end
+  object LnkDebugger: TLinkLabel
+    Left = 173
+    Top = 437
+    Width = 309
+    Height = 19
+    Caption = 
+      '<a href="https://github.com/csm101/delphi-visual-studio-code-deb' +
+      'ugger">github.com/csm101/delphi-visual-studio-code-debugger</a>'
+    TabOrder = 34
     OnLinkClick = HomePageLinkClick
   end
 end

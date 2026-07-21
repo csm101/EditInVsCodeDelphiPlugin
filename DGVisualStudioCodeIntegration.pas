@@ -11,9 +11,13 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.JSON,
+  System.Variants,
   System.UITypes,
   System.Generics.Collections,
+  System.Win.Registry,
   ToolsAPI,
+  DCCStrs,
+  CommonOptionStrs,
   Vcl.Menus,
   Vcl.Dialogs,
   Vcl.ActnList,
@@ -140,74 +144,88 @@ begin
   Result := 'file:///' + S;
 end;
 
-// Applies standard Delphi settings to a JSON object.
-// Used both in .code-workspace (Settings is the "settings" sub-object)
-// and in .vscode/settings.json (Settings is the file root).
-procedure ApplyStandardDelphiSettings(Settings: TJSONObject; ActiveProject: IOTAProject);
-  procedure AddIfMissing(Target: TJSONObject; const Key: string; Value: TJSONValue);
-  begin
-    if Target.GetValue(Key) = nil then
-      Target.AddPair(Key, Value)
-    else
-      Value.Free;
-  end;
-
-  procedure AddTrueIfMissing(Target: TJSONObject; const Key: string);
-  begin
-    AddIfMissing(Target, Key, TJSONBool.Create(True));
-  end;
-
+// Builds the plugin's built-in default settings.
+// These are used ONLY to create the shared defaults file the first time; from
+// then on that versioned file is the source of truth and this is not consulted.
+function BuildBuiltInWorkspaceSettings: TJSONObject;
 begin
-  // files.exclude: preserve user values and only add missing defaults
-  var FilesExclude := Settings.GetValue('files.exclude') as TJSONObject;
-  if FilesExclude = nil then begin
-    FilesExclude := TJSONObject.Create;
-    Settings.AddPair('files.exclude', FilesExclude);
-  end;
+  var Settings := TJSONObject.Create;
+  Result := Settings;
+
+  var FilesExclude := TJSONObject.Create;
   for var Pattern in ['**/Debug', '**/Release',
                       '**/Win32/Debug', '**/Win32/Release',
                       '**/Win64/Debug', '**/Win64/Release',
                       '**/__recovery', '**/__history',
                       '**/.#*', '**/*.rc', '**/*.res', '**/*.RES',
                       '**/*.bak', '**/*.BAK'] do
-    AddTrueIfMissing(FilesExclude, Pattern);
+    FilesExclude.AddPair(Pattern, TJSONBool.Create(True));
+  Settings.AddPair('files.exclude', FilesExclude);
 
-  AddIfMissing(Settings, 'files.trimTrailingWhitespace', TJSONBool.Create(True));
-  AddIfMissing(Settings, 'files.autoGuessEncoding', TJSONBool.Create(True));
-  AddIfMissing(Settings, 'editor.detectIndentation', TJSONBool.Create(False));
-  AddIfMissing(Settings, 'editor.foldingMaximumRegions', TJSONNumber.Create(8000));
+  Settings.AddPair('files.trimTrailingWhitespace', TJSONBool.Create(True));
+  Settings.AddPair('files.autoGuessEncoding', TJSONBool.Create(True));
+  Settings.AddPair('editor.detectIndentation', TJSONBool.Create(False));
+  Settings.AddPair('editor.foldingMaximumRegions', TJSONNumber.Create(8000));
 
   // [objectpascal]: bracket pairs for begin/end, case/end, etc.
-  var PascalSettings := Settings.GetValue('[objectpascal]') as TJSONObject;
-  if PascalSettings = nil then begin
-    PascalSettings := TJSONObject.Create;
-    var PascalBrackets := TJSONArray.Create;
-    for var OpenClose in ['begin|end', 'case|end', 'repeat|until',
-                          'try|end', 'while|do', 'if|then', 'for|do'] do begin
-      var Parts := OpenClose.Split(['|']);
-      var BracketPair := TJSONArray.Create;
-      BracketPair.Add(Parts[0]);
-      BracketPair.Add(Parts[1]);
-      PascalBrackets.Add(BracketPair);
-    end;
-    PascalSettings.AddPair('editor.language.brackets', PascalBrackets);
-    Settings.AddPair('[objectpascal]', PascalSettings);
+  var PascalSettings := TJSONObject.Create;
+  var PascalBrackets := TJSONArray.Create;
+  for var OpenClose in ['begin|end', 'case|end', 'repeat|until',
+                        'try|end', 'while|do', 'if|then', 'for|do'] do begin
+    var Parts := OpenClose.Split(['|']);
+    var BracketPair := TJSONArray.Create;
+    BracketPair.Add(Parts[0]);
+    BracketPair.Add(Parts[1]);
+    PascalBrackets.Add(BracketPair);
   end;
+  PascalSettings.AddPair('editor.language.brackets', PascalBrackets);
+  Settings.AddPair('[objectpascal]', PascalSettings);
 
   // [markdown]: preserve trailing whitespace
-  var MarkdownSettings := Settings.GetValue('[markdown]') as TJSONObject;
-  if MarkdownSettings = nil then begin
-    MarkdownSettings := TJSONObject.Create;
-    Settings.AddPair('[markdown]', MarkdownSettings);
-  end;
-  AddIfMissing(MarkdownSettings, 'files.trimTrailingWhitespace', TJSONBool.Create(False));
-  AddIfMissing(MarkdownSettings, 'editor.trimAutoWhitespace', TJSONBool.Create(False));
+  var MarkdownSettings := TJSONObject.Create;
+  MarkdownSettings.AddPair('files.trimTrailingWhitespace', TJSONBool.Create(False));
+  MarkdownSettings.AddPair('editor.trimAutoWhitespace', TJSONBool.Create(False));
+  Settings.AddPair('[markdown]', MarkdownSettings);
+end;
 
-  // delphiLsp.settingsFile: point to the active project's .delphilsp.json
+// Copies every key of ASource that ATarget does not already define. Objects are
+// merged one key at a time rather than replaced, so a user who customised one
+// entry of "files.exclude" still receives the other defaults. A value the user
+// already set is never overwritten.
+procedure MergeMissingInto(ATarget, ASource: TJSONObject);
+begin
+  if (ATarget = nil) or (ASource = nil) then
+    Exit;
+
+  for var Pair in ASource do begin
+    var Key := Pair.JsonString.Value;
+    var Existing := ATarget.GetValue(Key);
+    if Existing = nil then begin
+      ATarget.AddPair(Key, Pair.JsonValue.Clone as TJSONValue);
+      Continue;
+    end;
+    if (Existing is TJSONObject) and (Pair.JsonValue is TJSONObject) then
+      MergeMissingInto(TJSONObject(Existing), TJSONObject(Pair.JsonValue));
+  end;
+end;
+
+// Applies standard Delphi settings to a JSON object.
+// Used both in .code-workspace (Settings is the "settings" sub-object)
+// and in .vscode/settings.json (Settings is the file root).
+// The shared values come from the versioned defaults file; only the
+// project-specific ones are still produced here.
+procedure ApplyStandardDelphiSettings(Settings: TJSONObject; ActiveProject: IOTAProject;
+  ADefaults: TJSONObject);
+begin
+  if ADefaults <> nil then
+    MergeMissingInto(Settings, ADefaults.GetValue('settings') as TJSONObject);
+
+  // delphiLsp.settingsFile: points at THIS project's .delphilsp.json, on THIS
+  // machine, so it stays generated and never enters the shared file.
   if ActiveProject <> nil then begin
     var DelphiLspFile := ChangeFileExt(ActiveProject.FileName, '.delphilsp.json');
-    if TFile.Exists(DelphiLspFile) then
-      AddIfMissing(Settings, 'delphiLsp.settingsFile', TJSONString.Create(PathToFileUri(DelphiLspFile)));
+    if TFile.Exists(DelphiLspFile) and (Settings.GetValue('delphiLsp.settingsFile') = nil) then
+      Settings.AddPair('delphiLsp.settingsFile', PathToFileUri(DelphiLspFile));
   end;
 end;
 
@@ -223,20 +241,34 @@ const
   PLUGIN_MANAGED_BY_VALUE = 'editinvscode-delphi-plugin';
   PLUGIN_SETTINGS_MENU_CAPTION = 'Edit in VS Code Settings...';
 
-procedure MergeExtensionRecommendations(ExtensionsObject: TJSONObject);
+// Adds the recommendations declared in the shared defaults file that the target
+// does not list yet. User-added entries are preserved.
+procedure MergeExtensionRecommendations(ExtensionsObject: TJSONObject; ADefaults: TJSONObject);
 var
   ExistingRecommendations: TJSONArray;
   DefaultRecommendations: TJSONArray;
+  OwnsDefaults: Boolean;
   HasItem: Boolean;
 begin
-  ExistingRecommendations := ExtensionsObject.GetValue('recommendations') as TJSONArray;
-  if ExistingRecommendations = nil then begin
-    ExtensionsObject.AddPair('recommendations', BuildExtensionRecommendations);
-    Exit;
+  DefaultRecommendations := nil;
+  OwnsDefaults := False;
+  if ADefaults <> nil then begin
+    var SharedExtensions := ADefaults.GetValue('extensions') as TJSONObject;
+    if SharedExtensions <> nil then
+      DefaultRecommendations := SharedExtensions.GetValue('recommendations') as TJSONArray;
+  end;
+  if DefaultRecommendations = nil then begin
+    DefaultRecommendations := BuildExtensionRecommendations;
+    OwnsDefaults := True;
   end;
 
-  DefaultRecommendations := BuildExtensionRecommendations;
   try
+    ExistingRecommendations := ExtensionsObject.GetValue('recommendations') as TJSONArray;
+    if ExistingRecommendations = nil then begin
+      ExtensionsObject.AddPair('recommendations', DefaultRecommendations.Clone as TJSONValue);
+      Exit;
+    end;
+
     for var DefaultItem in DefaultRecommendations do begin
       HasItem := False;
       for var ExistingItem in ExistingRecommendations do
@@ -248,8 +280,56 @@ begin
         ExistingRecommendations.AddElement(DefaultItem.Clone as TJSONValue);
     end;
   finally
-    DefaultRecommendations.Free;
+    if OwnsDefaults then
+      DefaultRecommendations.Free;
   end;
+end;
+
+procedure WriteTextIfChanged(const AFileName, AContent: string; AEncoding: TEncoding); forward;
+
+const
+  // Shared with the team and meant to be put under version control, next to the
+  // .groupproj (or next to the project, in folder mode). The generated
+  // .code-workspace should NOT be versioned: it holds the checkout path, the
+  // project that happened to be active, and a per-developer debug configuration.
+  WORKSPACE_DEFAULTS_FILE = 'vscode-workspace-defaults.json';
+  WORKSPACE_DEFAULTS_VERSION = 1;
+
+// Reads the shared defaults file, creating it from the plugin's built-in
+// defaults when it is absent. The caller owns the result.
+// An existing but unreadable file is never overwritten: the built-in defaults
+// are used in memory and the user's file is left untouched.
+function LoadOrCreateWorkspaceDefaults(const ADir: string): TJSONObject;
+begin
+  var FileName := IncludeTrailingPathDelimiter(ADir) + WORKSPACE_DEFAULTS_FILE;
+  var AlreadyExists := TFile.Exists(FileName);
+  if AlreadyExists then begin
+    Result := nil;
+    try
+      Result := TJSONObject.ParseJSONValue(TFile.ReadAllText(FileName)) as TJSONObject;
+    except
+      Result := nil;
+    end;
+    if Result <> nil then
+      Exit;
+  end;
+
+  Result := TJSONObject.Create;
+  Result.AddPair('$comment', 'Shared VS Code settings for this project. Put this file under ' +
+    'version control. The generated .code-workspace next to it should not be versioned: it ' +
+    'contains machine-specific paths and a per-developer debug configuration.');
+  Result.AddPair('version', TJSONNumber.Create(WORKSPACE_DEFAULTS_VERSION));
+  Result.AddPair('settings', BuildBuiltInWorkspaceSettings);
+  var Extensions := TJSONObject.Create;
+  Extensions.AddPair('recommendations', BuildExtensionRecommendations);
+  Result.AddPair('extensions', Extensions);
+
+  if not AlreadyExists then
+    try
+      WriteTextIfChanged(FileName, Result.Format, TEncoding.UTF8);
+    except
+      // A read-only checkout must not break workspace generation.
+    end;
 end;
 
 procedure GenerateOrUpdateVSCodeFolderSettings(const FolderPath: string; ActiveProject: IOTAProject);
@@ -268,26 +348,1299 @@ begin
     Root := nil;
   if Root = nil then
     Root := TJSONObject.Create;
+  // Same shared file as in workspace mode, here next to the project.
+  var SharedDefaults := LoadOrCreateWorkspaceDefaults(FolderPath);
   try
-    ApplyStandardDelphiSettings(Root, ActiveProject);
-    TFile.WriteAllText(SettingsFile, Root.Format, TEncoding.UTF8);
+    try
+      ApplyStandardDelphiSettings(Root, ActiveProject, SharedDefaults);
+      WriteTextIfChanged(SettingsFile, Root.Format, TEncoding.UTF8);
+    finally
+      Root.Free;
+    end;
+
+    ExtFile := VscodePath + '\extensions.json';
+    if TFile.Exists(ExtFile) then
+      ExtRoot := TJSONObject.ParseJSONValue(TFile.ReadAllText(ExtFile)) as TJSONObject
+    else
+      ExtRoot := nil;
+    if ExtRoot = nil then
+      ExtRoot := TJSONObject.Create;
+    try
+      MergeExtensionRecommendations(ExtRoot, SharedDefaults);
+      WriteTextIfChanged(ExtFile, ExtRoot.Format, TEncoding.UTF8);
+    finally
+      ExtRoot.Free;
+    end;
+  finally
+    SharedDefaults.Free;
+  end;
+end;
+
+// Writes AContent to AFileName only if it differs from the current content.
+// Leaving an unchanged file completely untouched matters for more than editor
+// file-watcher noise: a version-control client that decides by timestamp
+// reports a rewritten-but-identical file as locally modified.
+procedure WriteTextIfChanged(const AFileName, AContent: string; AEncoding: TEncoding);
+begin
+  try
+    if TFile.Exists(AFileName) and (TFile.ReadAllText(AFileName, AEncoding) = AContent) then
+      Exit;
+  except
+    // Existing file unreadable: fall through and rewrite it.
+  end;
+  TFile.WriteAllText(AFileName, AContent, AEncoding);
+end;
+
+function GetDelphiBaseRegistryKey: string;
+begin
+  Result := '';
+  var Services := BorlandIDEServices as IOTAServices;
+  if Services = nil then
+    Exit;
+  Result := Services.GetBaseRegistryKey;
+  if Result.StartsWith('\') then
+    Result := Result.Substring(1);
+end;
+
+function GetDelphiVersionFromRegistry: string;
+begin
+  Result := '';
+  var BaseKey := GetDelphiBaseRegistryKey;
+  if BaseKey = '' then
+    Exit;
+
+  var SeparatorPos := LastDelimiter('\', BaseKey);
+  if SeparatorPos <= 0 then
+    Exit;
+  Result := Copy(BaseKey, SeparatorPos + 1, MaxInt);
+end;
+
+function ResolveDelphiMacroFallback(const AMacroName: string): string;
+begin
+  Result := '';
+
+  if SameText(AMacroName, 'BDS') then begin
+    var IdeExeDir := ExcludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0)));
+    if IdeExeDir <> '' then
+      Exit(IdeExeDir);
+    Exit;
+  end;
+
+  if SameText(AMacroName, 'BDSCOMMONDIR') then begin
+    var PublicDir := GetEnvironmentVariable('PUBLIC');
+    var DelphiVersion := GetDelphiVersionFromRegistry;
+    if (PublicDir = '') or (DelphiVersion = '') then
+      Exit;
+    Exit(TPath.Combine(PublicDir, TPath.Combine('Documents\Embarcadero\Studio', DelphiVersion)));
+  end;
+
+  if SameText(AMacroName, 'BDSLIB') then begin
+    var BdsDir := ResolveDelphiMacroFallback('BDS');
+    if BdsDir = '' then
+      Exit;
+    Exit(TPath.Combine(BdsDir, 'lib'));
+  end;
+end;
+
+// Expands Delphi make-style macros like $(BDS), $(BDSLIB) by reading env vars,
+// falling back to derived values when the variable is not in the environment.
+function ExpandDelphiMacros(const APath: string): string;
+var
+  S, MacroName: string;
+  P1, P2: Integer;
+begin
+  S := APath;
+  Result := '';
+  var Pos := 1;
+  while True do begin
+    P1 := S.IndexOf('$(', Pos - 1);
+    if P1 < 0 then begin
+      Result := Result + S.Substring(Pos - 1);
+      Break;
+    end;
+    Result := Result + S.Substring(Pos - 1, P1 - (Pos - 1));
+    P2 := S.IndexOf(')', P1 + 2);
+    if P2 < 0 then begin
+      Result := Result + S.Substring(P1);
+      Break;
+    end;
+    MacroName := S.Substring(P1 + 2, P2 - P1 - 2);
+    var EnvVal := GetEnvironmentVariable(MacroName);
+    if EnvVal = '' then
+      EnvVal := ResolveDelphiMacroFallback(MacroName);
+    if EnvVal <> '' then
+      Result := Result + EnvVal
+    else
+      Result := Result + '$(' + MacroName + ')';
+    Pos := P2 + 2;
+  end;
+end;
+
+function NormalizePathForJson(const APath: string): string;
+begin
+  Result := StringReplace(Trim(APath), '\', '/', [rfReplaceAll]);
+  while (Result <> '') and (Result[High(Result)] = '/') do
+    SetLength(Result, Length(Result) - 1);
+end;
+
+function ExpandProjectMacros(const ARawPath, AProjectDir, AProjectName,
+  APlatformName, AConfigName: string): string;
+begin
+  Result := ARawPath;
+  Result := StringReplace(Result, '$(Platform)', APlatformName, [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, '$(Config)', AConfigName, [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, '$(ProjectDir)', AProjectDir, [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, '$(ProjectName)', AProjectName, [rfReplaceAll, rfIgnoreCase]);
+  Result := ExpandDelphiMacros(Result);
+end;
+
+procedure GetActiveProjectBuildContext(AProject: IOTAProject;
+  out AProjectDir, AProjectName, APlatformName, AConfigName: string);
+var
+  Confs: IOTAProjectOptionsConfigurations140;
+begin
+  AProjectDir := '';
+  AProjectName := '';
+  APlatformName := 'Win64';
+  AConfigName := 'Debug';
+  if AProject = nil then
+    Exit;
+
+  AProjectDir := IncludeTrailingPathDelimiter(ExtractFilePath(AProject.FileName));
+  AProjectName := ChangeFileExt(ExtractFileName(AProject.FileName), '');
+
+  if Supports(AProject.ProjectOptions, IOTAProjectOptionsConfigurations140, Confs) then begin
+    var ActiveConfig := Confs.ActiveConfiguration;
+    if ActiveConfig <> nil then begin
+      if Trim(ActiveConfig.Platform) <> '' then
+        APlatformName := ActiveConfig.Platform;
+      if Trim(ActiveConfig.Name) <> '' then
+        AConfigName := ActiveConfig.Name;
+    end;
+  end;
+end;
+
+function GetProjectOptionValue(AProject: IOTAProject; const AOptionName: string): string;
+var
+  Confs: IOTAProjectOptionsConfigurations140;
+begin
+  Result := '';
+  if AProject = nil then
+    Exit;
+
+  if Supports(AProject.ProjectOptions, IOTAProjectOptionsConfigurations140, Confs) then begin
+    var ActiveConfig := Confs.ActiveConfiguration;
+    if ActiveConfig <> nil then begin
+      Result := Trim(ActiveConfig.GetValue(AOptionName, True));
+      if Result = '' then
+        Result := Trim(ActiveConfig.GetValue(AOptionName, False));
+    end;
+  end;
+
+  if Result = '' then begin
+    var Opts := AProject.GetProjectOptions;
+    if Opts <> nil then
+      Result := Trim(VarToStrDef(Opts.GetOptionValue(AOptionName), ''));
+  end;
+end;
+
+function ResolveProjectOutputDir(AProject: IOTAProject; const AOptionName,
+  AFallbackRelative: string): string;
+var
+  ProjectDir, ProjectName, PlatformName, ConfigName: string;
+  RawPath, FullPath: string;
+begin
+  Result := '';
+  if AProject = nil then
+    Exit;
+
+  GetActiveProjectBuildContext(AProject, ProjectDir, ProjectName, PlatformName, ConfigName);
+
+  RawPath := GetProjectOptionValue(AProject, AOptionName);
+  if RawPath = '' then
+    RawPath := AFallbackRelative;
+
+  RawPath := ExpandProjectMacros(RawPath, ProjectDir, ProjectName, PlatformName, ConfigName);
+  if RawPath = '' then
+    Exit;
+
+  FullPath := RawPath;
+  if not TPath.IsPathRooted(FullPath) then
+    FullPath := TPath.Combine(ProjectDir, FullPath);
+  FullPath := TPath.GetFullPath(FullPath);
+  Result := NormalizePathForJson(FullPath);
+end;
+
+function ResolveProjectOptionPathList(AProject: IOTAProject;
+  const AOptionName: string): TArray<string>;
+var
+  ProjectDir, ProjectName, PlatformName, ConfigName: string;
+  RawList: string;
+begin
+  Result := [];
+  if AProject = nil then
+    Exit;
+
+  RawList := GetProjectOptionValue(AProject, AOptionName);
+  if RawList = '' then
+    Exit;
+
+  GetActiveProjectBuildContext(AProject, ProjectDir, ProjectName, PlatformName, ConfigName);
+
+  for var RawPart in RawList.Split([';']) do begin
+    var Part := Trim(RawPart);
+    if Part = '' then
+      Continue;
+    Part := ExpandProjectMacros(Part, ProjectDir, ProjectName, PlatformName, ConfigName);
+    if Part = '' then
+      Continue;
+    if not TPath.IsPathRooted(Part) then
+      Part := TPath.Combine(ProjectDir, Part);
+    Part := NormalizePathForJson(TPath.GetFullPath(Part));
+    if Part = '' then
+      Continue;
+
+    var AlreadyAdded := False;
+    for var Existing in Result do
+      if SameText(Existing, Part) then begin
+        AlreadyAdded := True;
+        Break;
+      end;
+    if not AlreadyAdded then
+      Result := Result + [Part];
+  end;
+end;
+
+function ResolveIdePackageOutputDirs(AProject: IOTAProject): TArray<string>;
+var
+  ProjectDir, ProjectName, PlatformName, ConfigName: string;
+  BaseKey: string;
+  PlatformsToScan: TArray<string>;
+
+  procedure AddDirFromRawValue(const ARawValue: string);
+  begin
+    var Expanded := Trim(ARawValue);
+    if Expanded = '' then
+      Exit;
+
+    Expanded := ExpandProjectMacros(Expanded, ProjectDir, ProjectName, PlatformName, ConfigName);
+    if Expanded = '' then
+      Exit;
+    Expanded := StringReplace(Expanded, '/', '\', [rfReplaceAll]);
+    if Pos('$(', Expanded) > 0 then
+      Exit;
+    if not TPath.IsPathRooted(Expanded) then
+      Exit;
+
+    Expanded := NormalizePathForJson(TPath.GetFullPath(Expanded));
+    if Expanded = '' then
+      Exit;
+
+    for var Existing in Result do
+      if SameText(Existing, Expanded) then
+        Exit;
+    Result := Result + [Expanded];
+  end;
+
+begin
+  Result := [];
+  if AProject = nil then
+    Exit;
+
+  GetActiveProjectBuildContext(AProject, ProjectDir, ProjectName, PlatformName, ConfigName);
+  BaseKey := GetDelphiBaseRegistryKey;
+  if BaseKey = '' then
+    Exit;
+
+  PlatformsToScan := [PlatformName];
+  if not SameText(PlatformName, 'Win64') then
+    PlatformsToScan := PlatformsToScan + ['Win64'];
+
+  var Reg := TRegistry.Create(KEY_READ);
+  try
+    Reg.RootKey := HKEY_CURRENT_USER;
+    for var PlatformToScan in PlatformsToScan do begin
+      var LibraryKey := BaseKey + '\Library\' + PlatformToScan;
+      if not Reg.OpenKeyReadOnly(LibraryKey) then
+        Continue;
+      try
+        if Reg.ValueExists('Package DPL Output') then
+          AddDirFromRawValue(Reg.ReadString('Package DPL Output'));
+        if Reg.ValueExists('Package DCP Output') then
+          AddDirFromRawValue(Reg.ReadString('Package DCP Output'));
+      finally
+        Reg.CloseKey;
+      end;
+      if Length(Result) > 0 then
+        Break;
+    end;
+  finally
+    Reg.Free;
+  end;
+end;
+
+function ResolveProjectOutputFile(AProject: IOTAProject; const AFileName: string;
+  const ACandidateOptions: array of string; const ADefaultOption,
+  AFallbackRelative: string; const AExtraDirs: array of string): string;
+var
+  CandidateDirs: TArray<string>;
+
+  procedure AddCandidate(const ADir: string);
+  begin
+    if ADir = '' then
+      Exit;
+    for var Existing in CandidateDirs do
+      if SameText(Existing, ADir) then
+        Exit;
+    CandidateDirs := CandidateDirs + [ADir];
+  end;
+
+begin
+  CandidateDirs := [];
+  for var Opt in ACandidateOptions do
+    AddCandidate(ResolveProjectOutputDir(AProject, Opt, AFallbackRelative));
+
+  for var Dir in ResolveIdePackageOutputDirs(AProject) do
+    AddCandidate(Dir);
+
+  for var Dir in ResolveProjectOptionPathList(AProject, sUnitSearchPath) do
+    AddCandidate(Dir);
+  for var Dir in ResolveProjectOptionPathList(AProject, sLibraryPath) do
+    AddCandidate(Dir);
+  for var Dir in AExtraDirs do
+    AddCandidate(NormalizePathForJson(Dir));
+
+  if Length(CandidateDirs) = 0 then
+    AddCandidate(ResolveProjectOutputDir(AProject, ADefaultOption, AFallbackRelative));
+
+  for var Dir in CandidateDirs do begin
+    var Candidate := TPath.Combine(StringReplace(Dir, '/', PathDelim, [rfReplaceAll]), AFileName);
+    if TFile.Exists(Candidate) then
+      Exit(NormalizePathForJson(Candidate));
+  end;
+
+  if Length(CandidateDirs) > 0 then begin
+    var FirstCandidate := TPath.Combine(StringReplace(CandidateDirs[0], '/', PathDelim, [rfReplaceAll]), AFileName);
+    Exit(NormalizePathForJson(FirstCandidate));
+  end;
+
+  Result := NormalizePathForJson(AFileName);
+end;
+
+// Collects all source search paths visible to Delphi for AProject:
+//   - project-level DCC_UnitSearchPath
+//   - global IDE Win64 library/search path from the BDS registry key
+// Returns a JSON array of forward-slash absolute paths ready for launch.json.
+function CollectSourceSearchPaths(AProject: IOTAProject): TJSONArray;
+var
+  Seen: TDictionary<string, Boolean>;
+  ProjectDir, ProjectName, PlatformName, ConfigName: string;
+
+  // Resolves one raw search-path entry to an absolute, forward-slash path.
+  // The entry arrives straight from the project options or the IDE registry,
+  // so it may be relative and may still contain Delphi macros.
+  procedure AddPath(const APath: string);
+  var
+    Norm: string;
+  begin
+    Norm := Trim(APath);
+    if Norm = '' then
+      Exit;
+    // Expand the full project macro set, not just the environment/BDS ones:
+    // a library or unit search path routinely contains $(Platform), $(Config)
+    // or $(ProjectDir). An unexpanded macro that reaches launch.json is not
+    // understood by VS Code and is discarded by the debug adapter, so the
+    // directory is silently never searched.
+    Norm := ExpandProjectMacros(Norm, ProjectDir, ProjectName, PlatformName, ConfigName);
+    if (Norm = '') or Norm.Contains('$(') then
+      Exit;
+    // A relative entry is relative to the project directory, exactly as the
+    // compiler resolves it.
+    if not TPath.IsPathRooted(Norm) then begin
+      if ProjectDir = '' then
+        Exit;
+      Norm := TPath.Combine(ProjectDir, Norm);
+    end;
+    try
+      Norm := NormalizePathForJson(TPath.GetFullPath(Norm));
+    except
+      Exit; // malformed entry (e.g. stale registry value): skip it
+    end;
+    if (Norm = '') or Seen.ContainsKey(LowerCase(Norm)) then
+      Exit;
+    Seen.Add(LowerCase(Norm), True);
+    Result.Add(Norm);
+  end;
+
+  procedure AddSemicolonList(const AList: string);
+  begin
+    for var Part in AList.Split([';']) do
+      AddPath(Part);
+  end;
+
+begin
+  Result := TJSONArray.Create;
+  Seen := TDictionary<string, Boolean>.Create;
+  GetActiveProjectBuildContext(AProject, ProjectDir, ProjectName, PlatformName, ConfigName);
+  try
+    // Write the literal expanded BDS path -- VS Code cannot expand ${env:BDS}
+    // unless BDS is in VS Code's own process environment (it is not).
+    var BdsDir := GetEnvironmentVariable('BDS');
+    if BdsDir <> '' then
+      AddPath(BdsDir + '\source');
+
+    // Project-level unit search path. Read through GetProjectOptionValue so the
+    // ACTIVE build configuration wins: the raw IOTAProjectOptions getter returns
+    // the project-wide value and misses per-configuration overrides.
+    if AProject <> nil then
+      AddSemicolonList(GetProjectOptionValue(AProject, sUnitSearchPath));
+
+    // Global library / source paths stored by the IDE in the registry, for the
+    // platform the project actually builds for (PlatformName defaults to Win64).
+    var Services := BorlandIDEServices as IOTAServices;
+    if Services <> nil then begin
+      var BaseKey := Services.GetBaseRegistryKey;
+      if BaseKey.StartsWith('\') then
+        BaseKey := BaseKey.Substring(1);
+      var Reg := TRegistry.Create(KEY_READ);
+      try
+        Reg.RootKey := HKEY_CURRENT_USER;
+        if Reg.OpenKeyReadOnly(BaseKey + '\Library\' + PlatformName) then
+          try
+            if Reg.ValueExists('Search Path') then
+              AddSemicolonList(Reg.ReadString('Search Path'));
+          finally
+            Reg.CloseKey;
+          end;
+      finally
+        Reg.Free;
+      end;
+    end;
+  finally
+    Seen.Free;
+  end;
+end;
+
+procedure AddSearchPathIfMissing(APaths: TJSONArray; const APath: string);
+begin
+  if APaths = nil then
+    Exit;
+
+  var Norm := Trim(APath);
+  if Norm = '' then
+    Exit;
+  Norm := StringReplace(Norm, '\', '/', [rfReplaceAll]);
+  while (Norm <> '') and (Norm[High(Norm)] = '/') do
+    SetLength(Norm, Length(Norm) - 1);
+  if Norm = '' then
+    Exit;
+
+  for var I := 0 to APaths.Count - 1 do begin
+    var V := APaths.Items[I];
+    if (V <> nil) and SameText(StringReplace(V.Value, '\', '/', [rfReplaceAll]), Norm) then
+      Exit;
+  end;
+
+  APaths.Add(Norm);
+end;
+
+const
+  // VS Code substitutes this before the configuration reaches the debug adapter,
+  // so the generated file carries no machine-specific root.
+  WORKSPACE_FOLDER_MACRO = '${workspaceFolder}';
+
+// Rewrites an absolute path relative to the workspace root when it can be
+// expressed that way, so the generated configuration does not depend on where
+// the sources happen to be checked out. A dependency kept beside the workspace
+// becomes "${workspaceFolder}/../shared/lib".
+//
+// The relative form is DERIVED from the real paths, never assumed: a path on a
+// different drive, or one with no common root, is left absolute, which is still
+// correct - only less portable.
+function MakePathWorkspaceRelative(const APath, AWorkspaceDir: string): string;
+begin
+  Result := NormalizePathForJson(APath);
+  if (Result = '') or (AWorkspaceDir = '') or Result.StartsWith('$') then
+    Exit;
+  if not TPath.IsPathRooted(Result) then
+    Exit;
+
+  var Base := IncludeTrailingPathDelimiter(
+    StringReplace(NormalizePathForJson(AWorkspaceDir), '/', '\', [rfReplaceAll]));
+  var Dest := StringReplace(Result, '/', '\', [rfReplaceAll]);
+  if not SameText(ExtractFileDrive(Base), ExtractFileDrive(Dest)) then
+    Exit;
+
+  // The path IS the workspace root (the common case for sourceRoot).
+  // ExtractRelativePath treats the last segment as a file name and would answer
+  // "..\<rootname>", which silently breaks the moment the project is checked out
+  // into a differently named folder.
+  if SameText(ExcludeTrailingPathDelimiter(Base), Dest) then
+    Exit(WORKSPACE_FOLDER_MACRO);
+
+  var Rel := ExtractRelativePath(Base, Dest);
+  if (Rel = '') or TPath.IsPathRooted(Rel) then
+    Exit;
+
+  Rel := NormalizePathForJson(Rel);
+  if Rel.StartsWith('./') then
+    Rel := Rel.Substring(2);
+  if (Rel = '') or (Rel = '.') then
+    Exit(WORKSPACE_FOLDER_MACRO);
+  Result := WORKSPACE_FOLDER_MACRO + '/' + Rel;
+end;
+
+// Applies MakePathWorkspaceRelative to every path a delphi-win64 configuration
+// carries. Called once on the finished configuration, where the workspace root
+// is known - CollectSourceSearchPaths itself has no way to know it.
+procedure MakeLaunchConfigPortable(AConfig: TJSONObject; const AWorkspaceDir: string);
+
+  procedure RewritePathPair(AObj: TJSONObject; const AName: string);
+  begin
+    if AObj = nil then
+      Exit;
+    var Value := AObj.GetValue(AName);
+    if not (Value is TJSONString) then
+      Exit;
+    var Portable := MakePathWorkspaceRelative(Value.Value, AWorkspaceDir);
+    if Portable = Value.Value then
+      Exit;
+    AObj.RemovePair(AName).Free;
+    AObj.AddPair(AName, Portable);
+  end;
+
+begin
+  if (AConfig = nil) or (AWorkspaceDir = '') then
+    Exit;
+
+  for var PairName in ['program', 'sourceRoot', 'mapFile', 'rsmFile'] do
+    RewritePathPair(AConfig, PairName);
+
+  var Paths := AConfig.GetValue('sourceSearchPaths');
+  if Paths is TJSONArray then begin
+    var Portable := TJSONArray.Create;
+    for var I := 0 to TJSONArray(Paths).Count - 1 do
+      Portable.Add(MakePathWorkspaceRelative(TJSONArray(Paths).Items[I].Value, AWorkspaceDir));
+    AConfig.RemovePair('sourceSearchPaths').Free;
+    AConfig.AddPair('sourceSearchPaths', Portable);
+  end;
+
+  var Modules := AConfig.GetValue('modules');
+  if Modules is TJSONArray then
+    for var Item in TJSONArray(Modules) do
+      if Item is TJSONObject then
+        for var PairName in ['map', 'rsm', 'dcp'] do
+          RewritePathPair(TJSONObject(Item), PairName);
+end;
+
+function GetCommonPathPrefixNormalized(const APath1, APath2: string): string;
+begin
+  Result := '';
+  var LeftPath := Trim(APath1);
+  var RightPath := Trim(APath2);
+  if (LeftPath = '') or (RightPath = '') then
+    Exit;
+
+  LeftPath := StringReplace(LeftPath, '/', PathDelim, [rfReplaceAll]);
+  RightPath := StringReplace(RightPath, '/', PathDelim, [rfReplaceAll]);
+  if not TPath.IsPathRooted(LeftPath) or not TPath.IsPathRooted(RightPath) then
+    Exit;
+
+  LeftPath := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LeftPath));
+  RightPath := ExcludeTrailingPathDelimiter(TPath.GetFullPath(RightPath));
+
+  var LeftRoot := IncludeTrailingPathDelimiter(TPath.GetPathRoot(LeftPath));
+  var RightRoot := IncludeTrailingPathDelimiter(TPath.GetPathRoot(RightPath));
+  if (LeftRoot = '') or (RightRoot = '') then
+    Exit;
+  if not SameText(LeftRoot, RightRoot) then
+    Exit;
+
+  var LeftRest := Copy(LeftPath, Length(LeftRoot) + 1, MaxInt);
+  var RightRest := Copy(RightPath, Length(RightRoot) + 1, MaxInt);
+
+  var LeftParts := LeftRest.Split([PathDelim], TStringSplitOptions.ExcludeEmpty);
+  var RightParts := RightRest.Split([PathDelim], TStringSplitOptions.ExcludeEmpty);
+
+  var MaxCommon := Length(LeftParts);
+  if Length(RightParts) < MaxCommon then
+    MaxCommon := Length(RightParts);
+
+  var CommonPath := LeftRoot;
+  for var Index := 0 to MaxCommon - 1 do begin
+    if not SameText(LeftParts[Index], RightParts[Index]) then
+      Break;
+    CommonPath := TPath.Combine(CommonPath, LeftParts[Index]);
+  end;
+  Result := NormalizePathForJson(ExcludeTrailingPathDelimiter(CommonPath));
+end;
+
+function GetPackageSourceRoot(const AProjectDir, AExpandedHostApp,
+  ASourceRootOverride: string): string;
+begin
+  Result := NormalizePathForJson(ASourceRootOverride);
+  if Result <> '' then
+    Exit;
+
+  Result := NormalizePathForJson(AProjectDir);
+  if Result = '' then
+    Exit;
+
+  if AExpandedHostApp = '' then
+    Exit;
+  if Pos('$(', AExpandedHostApp) > 0 then
+    Exit;
+
+  var HostPath := StringReplace(AExpandedHostApp, '/', PathDelim, [rfReplaceAll]);
+  if not TPath.IsPathRooted(HostPath) then
+    Exit;
+
+  var HostDir := NormalizePathForJson(ExtractFileDir(HostPath));
+  if HostDir = '' then
+    Exit;
+
+  var CommonRoot := GetCommonPathPrefixNormalized(Result, HostDir);
+  if CommonRoot = '' then
+    Exit;
+  if (Length(CommonRoot) <= 3) and (Pos(':', CommonRoot) > 0) then
+    Exit;
+  Result := CommonRoot;
+end;
+
+function GetProjectHostApplication(AProject: IOTAProject): string;
+var
+  Opts: IOTAProjectOptions;
+  Val: Variant;
+  Confs: IOTAProjectOptionsConfigurations140;
+  ProjectDir, ProjectName, PlatformName, ConfigName, RawHostApp: string;
+begin
+  Result := '';
+  if AProject = nil then
+    Exit;
+
+  ProjectDir := IncludeTrailingPathDelimiter(ExtractFilePath(AProject.FileName));
+  ProjectName := ChangeFileExt(ExtractFileName(AProject.FileName), '');
+  PlatformName := 'Win64';
+  ConfigName := 'Debug';
+
+  if Supports(AProject.ProjectOptions, IOTAProjectOptionsConfigurations140, Confs) then begin
+    var ActiveConfig := Confs.ActiveConfiguration;
+    if ActiveConfig <> nil then begin
+      PlatformName := ActiveConfig.Platform;
+      ConfigName := ActiveConfig.Name;
+
+      RawHostApp := Trim(ActiveConfig.GetValue(sDebugger_HostApplication, True));
+      if RawHostApp <> '' then
+        Exit(ExpandProjectMacros(RawHostApp, ProjectDir, ProjectName, PlatformName, ConfigName));
+
+      RawHostApp := Trim(ActiveConfig.GetValue(sDebugger_HostApplication, False));
+      if RawHostApp <> '' then
+        Exit(ExpandProjectMacros(RawHostApp, ProjectDir, ProjectName, PlatformName, ConfigName));
+    end;
+  end;
+
+  Opts := AProject.GetProjectOptions;
+  if Opts = nil then
+    Exit;
+  Val := Opts.GetOptionValue(sDebugger_HostApplication);
+  RawHostApp := Trim(VarToStrDef(Val, ''));
+  if RawHostApp = '' then
+    Exit;
+  Result := ExpandProjectMacros(RawHostApp, ProjectDir, ProjectName, PlatformName, ConfigName);
+end;
+
+function BuildProgramLaunchConfig(const AProjectName, APreLaunchTask, AProjectDir: string;
+  AProject: IOTAProject): TJSONObject;
+var
+  Base: string;
+  ProgramPath, MapPath, RsmPath: string;
+  SearchPaths: TJSONArray;
+begin
+  Base := StringReplace(AProjectDir, '\', '/', [rfReplaceAll]);
+  ProgramPath := ResolveProjectOutputFile(AProject, AProjectName + '.exe',
+    [sExeOutput], sExeOutput, '.\\$(Platform)\\$(Config)', []);
+  MapPath := ResolveProjectOutputFile(AProject, AProjectName + '.map',
+    [sExeOutput, sBplOutput], sExeOutput, '.\\$(Platform)\\$(Config)', []);
+  RsmPath := ResolveProjectOutputFile(AProject, AProjectName + '.rsm',
+    [sExeOutput, sDcpOutput, sDcuOutput], sExeOutput, '.\\$(Platform)\\$(Config)', []);
+
+  Result := TJSONObject.Create;
+  Result.AddPair('type', 'delphi-win64');
+  Result.AddPair('request', 'launch');
+  Result.AddPair('name', 'Debug ' + AProjectName);
+  if APreLaunchTask <> '' then
+    Result.AddPair('preLaunchTask', APreLaunchTask);
+  Result.AddPair('program', ProgramPath);
+  Result.AddPair('mapFile', MapPath);
+  Result.AddPair('rsmFile', RsmPath);
+  Result.AddPair('sourceRoot', Base);
+  SearchPaths := CollectSourceSearchPaths(AProject);
+  AddSearchPathIfMissing(SearchPaths, Base);
+  Result.AddPair('sourceSearchPaths', SearchPaths);
+  // Set here rather than when the configuration is stored: stopAtEntry belongs
+  // to a launch request only, and the storing code now also handles an attach
+  // configuration, for which the property is meaningless.
+  Result.AddPair('stopAtEntry', TJSONBool.Create(False));
+end;
+
+function BuildPackageLaunchConfig(const AProjectName, AProjectDir, AHostAppPath, APreLaunchTask: string;
+  AProject: IOTAProject; const ASourceRootOverride: string = ''): TJSONObject;
+var
+  ExpandedHostApp, HostMapFile, ProjBase, SourceRoot: string;
+  MapPath, RsmPath, DcpPath: string;
+  HostOutputDir: string;
+  SearchPaths: TJSONArray;
+begin
+  if Pos('$(', AHostAppPath) > 0 then
+    ExpandedHostApp := AHostAppPath
+  else if TPath.IsRelativePath(AHostAppPath) then
+    ExpandedHostApp := TPath.GetFullPath(TPath.Combine(AProjectDir, AHostAppPath))
+  else
+    ExpandedHostApp := AHostAppPath;
+  ExpandedHostApp := StringReplace(ExpandedHostApp, '\', '/', [rfReplaceAll]);
+
+  Result := TJSONObject.Create;
+  Result.AddPair('type', 'delphi-win64');
+  Result.AddPair('request', 'launch');
+  Result.AddPair('name', 'Debug ' + AProjectName + ' (BPL)');
+  if APreLaunchTask <> '' then
+    Result.AddPair('preLaunchTask', APreLaunchTask);
+  Result.AddPair('program', ExpandedHostApp);
+
+  HostMapFile := ChangeFileExt(ExpandedHostApp, '.map');
+  if TFile.Exists(StringReplace(HostMapFile, '/', '\', [rfReplaceAll])) then
+    Result.AddPair('mapFile', HostMapFile);
+
+  HostOutputDir := NormalizePathForJson(ExtractFileDir(ExpandedHostApp));
+
+  ProjBase := StringReplace(AProjectDir, '\', '/', [rfReplaceAll]);
+  SourceRoot := GetPackageSourceRoot(ProjBase, ExpandedHostApp, ASourceRootOverride);
+  Result.AddPair('sourceRoot', SourceRoot);
+  SearchPaths := CollectSourceSearchPaths(AProject);
+  AddSearchPathIfMissing(SearchPaths, SourceRoot);
+  AddSearchPathIfMissing(SearchPaths, ProjBase);
+  AddSearchPathIfMissing(SearchPaths, HostOutputDir);
+  Result.AddPair('sourceSearchPaths', SearchPaths);
+
+  MapPath := ResolveProjectOutputFile(AProject, AProjectName + '.map',
+    [sBplOutput, sExeOutput], sBplOutput, '.\\$(Platform)\\$(Config)', [HostOutputDir]);
+  RsmPath := ResolveProjectOutputFile(AProject, AProjectName + '.rsm',
+    [sBplOutput, sDcpOutput, sExeOutput], sBplOutput, '.\\$(Platform)\\$(Config)', [HostOutputDir]);
+  DcpPath := ResolveProjectOutputFile(AProject, AProjectName + '.dcp',
+    [sDcpOutput, sBplOutput, sExeOutput], sDcpOutput, '.\\$(Platform)\\$(Config)', [HostOutputDir]);
+
+  var ModEntry := TJSONObject.Create;
+  // Use "AProjectName + '.bpl'", NOT ExtractFileName(BplPath): BplPath is already
+  // forward-slash normalized for JSON, and ExtractFileName splits only on '\' and
+  // ':', so on "C:/.../libFoo.bpl" it returns "/.../libFoo.bpl" -- a malformed name
+  // the adapter then fails to match to the loaded module.
+  ModEntry.AddPair('name', AProjectName + '.bpl');
+  ModEntry.AddPair('map', MapPath);
+  ModEntry.AddPair('rsm', RsmPath);
+  ModEntry.AddPair('dcp', DcpPath);
+  var Modules := TJSONArray.Create;
+  Modules.Add(ModEntry);
+  Result.AddPair('modules', Modules);
+  // See BuildProgramLaunchConfig: launch-only property, set by the builder.
+  Result.AddPair('stopAtEntry', TJSONBool.Create(False));
+end;
+
+// Extracts the file name from a path already normalized for JSON.
+// ExtractFileName splits on '\' and ':' only, so on "C:/out/Foo.exe" it would
+// answer "/out/Foo.exe"; the separators have to be converted back first.
+function ExtractFileNameFromJsonPath(const AJsonPath: string): string;
+begin
+  Result := ExtractFileName(StringReplace(AJsonPath, '/', PathDelim, [rfReplaceAll]));
+end;
+
+// Builds the attach configuration matching ALaunchConfig, or nil when the launch
+// configuration names no executable.
+//
+// It is DERIVED from the finished launch configuration instead of resolving the
+// project options a second time. Reusing the values is the whole point of
+// generating the entry at all: sourceRoot, sourceSearchPaths and modules are
+// what nobody wants to write by hand, and copying them makes it structurally
+// impossible for the two configurations to drift apart.
+function BuildAttachConfig(ALaunchConfig: TJSONObject): TJSONObject;
+begin
+  Result := nil;
+  if ALaunchConfig = nil then
+    Exit;
+
+  var ProgramPath := ALaunchConfig.GetValue<string>('program', '');
+  if ProgramPath = '' then
+    Exit;
+  // The launch "program" already IS the process the user would attach to: the
+  // project output for a .dpr, the Host application for a .dpk.
+  var ExeName := ExtractFileNameFromJsonPath(ProgramPath);
+  if ExeName = '' then
+    Exit;
+
+  Result := TJSONObject.Create;
+  Result.AddPair('type', 'delphi-win64');
+  Result.AddPair('request', 'attach');
+  Result.AddPair('name', 'Attach to ' + ExeName);
+  Result.AddPair('processName', ExeName);
+  // Optional for the adapter, but worth writing: it derives the .map/.rsm from
+  // this path, so symbols still resolve when the running image is a copy
+  // deployed somewhere other than the build output directory.
+  Result.AddPair('program', ProgramPath);
+  // Detaching leaves the application running. Attaching is a diagnostic step on
+  // a process the debugger does not own, so killing it on stop would be wrong.
+  Result.AddPair('killOnDetach', TJSONBool.Create(False));
+
+  // The symbol/source properties are shared verbatim with the launch entry.
+  for var PairName in ['sourceRoot', 'sourceSearchPaths', 'modules'] do begin
+    var Value := ALaunchConfig.GetValue(PairName);
+    if Value <> nil then
+      Result.AddPair(PairName, Value.Clone as TJSONValue);
+  end;
+end;
+
+// Stores ANewConfigs into AConfigs as THE plugin-managed set, replacing the
+// previous generation. User-authored configurations are preserved.
+//
+// The managed set is keyed by name: the plugin writes more than one entry
+// (launch + attach), so removing "every managed entry" once per entry would make
+// the second write delete the first. Everything is therefore removed once, up
+// front, and the new set appended in the given order.
+procedure UpsertManagedDebugConfigs(AConfigs: TJSONArray; const ANewConfigs: array of TJSONObject);
+var
+  NewNames: TArray<string>;
+
+  function IsOneOfTheNewNames(const AName: string): Boolean;
+  begin
+    for var NewName in NewNames do
+      if SameText(NewName, AName) then
+        Exit(True);
+    Result := False;
+  end;
+
+begin
+  NewNames := [];
+  for var NewConfig in ANewConfigs do
+    NewNames := NewNames + [NewConfig.GetValue<string>('name', '')];
+
+  for var I := AConfigs.Count - 1 downto 0 do begin
+    var Item := AConfigs.Items[I] as TJSONObject;
+    if Item = nil then
+      Continue;
+    var TypeVal := Item.GetValue('type');
+    if (TypeVal = nil) or not SameText(TypeVal.Value, 'delphi-win64') then
+      Continue;
+    // A managed entry always goes, whatever its name: that also clears entries
+    // left behind by a renamed project or by an older plugin version. A
+    // user-authored entry goes only when it claims one of the names about to be
+    // written, because two configurations cannot share a name.
+    var ManagedVal := Item.GetValue(PLUGIN_MANAGED_BY_FIELD);
+    var IsManaged := (ManagedVal <> nil) and SameText(ManagedVal.Value, PLUGIN_MANAGED_BY_VALUE);
+    var NameVal := Item.GetValue('name');
+    var ClaimsManagedName := (NameVal <> nil) and IsOneOfTheNewNames(NameVal.Value);
+    if IsManaged or ClaimsManagedName then
+      AConfigs.Remove(I).Free;
+  end;
+
+  for var NewConfig in ANewConfigs do begin
+    NewConfig.AddPair(PLUGIN_MANAGED_BY_FIELD, PLUGIN_MANAGED_BY_VALUE);
+    AConfigs.Add(NewConfig);
+  end;
+end;
+
+// Makes ALaunchConfig portable, derives the matching attach configuration and
+// stores both as the managed set.
+// AWorkspaceDir empty means the workspace root is ambiguous (several roots), in
+// which case the paths are left absolute.
+procedure UpsertManagedDebugConfigsFor(AConfigs: TJSONArray; ALaunchConfig: TJSONObject;
+  const AWorkspaceDir: string);
+begin
+  var AttachConfig: TJSONObject := nil;
+  if TPluginSettings.GenerateAttachConfig then
+    AttachConfig := BuildAttachConfig(ALaunchConfig);
+
+  MakeLaunchConfigPortable(ALaunchConfig, AWorkspaceDir);
+  MakeLaunchConfigPortable(AttachConfig, AWorkspaceDir);
+
+  // The launch entry must stay first: VS Code preselects the first
+  // configuration, so F5 keeps starting the program with no extra choice.
+  if AttachConfig = nil then
+    UpsertManagedDebugConfigs(AConfigs, [ALaunchConfig])
+  else
+    UpsertManagedDebugConfigs(AConfigs, [ALaunchConfig, AttachConfig]);
+end;
+
+// Writes ALaunchConfig, plus the attach configuration derived from it, into
+// AProjectDir\.vscode\launch.json. The existing "version" and any user
+// configurations are preserved: only the plugin-managed entries are replaced.
+procedure WriteManagedLaunchConfigToDir(const AProjectDir: string; ALaunchConfig: TJSONObject);
+var
+  VscodePath, LaunchFile: string;
+  Root: TJSONObject;
+begin
+  VscodePath := IncludeTrailingPathDelimiter(AProjectDir) + '.vscode';
+  if not TDirectory.Exists(VscodePath) then
+    TDirectory.CreateDirectory(VscodePath);
+  LaunchFile := VscodePath + '\launch.json';
+
+  if TFile.Exists(LaunchFile) then
+    Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(LaunchFile)) as TJSONObject
+  else
+    Root := nil;
+  if Root = nil then
+    Root := TJSONObject.Create;
+  try
+    if Root.GetValue('version') = nil then
+      Root.AddPair('version', '0.2.0');
+    var Configs := Root.GetValue('configurations') as TJSONArray;
+    if Configs = nil then begin
+      Configs := TJSONArray.Create;
+      Root.AddPair('configurations', Configs);
+    end;
+    // Folder mode always has exactly one root, so ${workspaceFolder} is
+    // unambiguous here and the generated paths stay checkout-independent.
+    UpsertManagedDebugConfigsFor(Configs, ALaunchConfig, ExcludeTrailingPathDelimiter(AProjectDir));
+    WriteTextIfChanged(LaunchFile, Root.Format, TEncoding.UTF8);
   finally
     Root.Free;
   end;
+end;
 
-  ExtFile := VscodePath + '\extensions.json';
-  if TFile.Exists(ExtFile) then
-    ExtRoot := TJSONObject.ParseJSONValue(TFile.ReadAllText(ExtFile)) as TJSONObject
+function BuildBuildTaskConfig(const AProjectName, AProjectFileName: string; AIsBpl: Boolean): TJSONObject;
+var
+  TaskLabel, DprojFile, MsBuildCmd: string;
+begin
+  if AIsBpl then
+    TaskLabel := 'Build ' + AProjectName + ' BPL (Debug Win64)'
   else
-    ExtRoot := nil;
-  if ExtRoot = nil then
-    ExtRoot := TJSONObject.Create;
-  try
-    MergeExtensionRecommendations(ExtRoot);
-    TFile.WriteAllText(ExtFile, ExtRoot.Format, TEncoding.UTF8);
-  finally
-    ExtRoot.Free;
+    TaskLabel := 'Build ' + AProjectName + ' (Debug Win64)';
+  DprojFile := ExtractFileName(AProjectFileName);
+  MsBuildCmd := 'rsvars.bat && msbuild ' + DprojFile + ' /t:Build /p:Config=Debug;Platform=Win64 /nologo';
+
+  Result := TJSONObject.Create;
+  Result.AddPair('label', TaskLabel);
+  Result.AddPair('type', 'shell');
+  Result.AddPair('command', 'cmd');
+  var Args := TJSONArray.Create;
+  Args.Add('/c');
+  Args.Add(MsBuildCmd);
+  Result.AddPair('args', Args);
+  var Options := TJSONObject.Create;
+  var ProjectDir := StringReplace(ExcludeTrailingPathDelimiter(ExtractFilePath(AProjectFileName)), '\', '/', [rfReplaceAll]);
+  Options.AddPair('cwd', ProjectDir);
+  Result.AddPair('options', Options);
+  var Presentation := TJSONObject.Create;
+  Presentation.AddPair('reveal', 'always');
+  Presentation.AddPair('panel', 'shared');
+  Result.AddPair('presentation', Presentation);
+  var Pattern := TJSONObject.Create;
+  Pattern.AddPair('regexp', '^(.+)\((\d+)\)\s+(Fatal|Error|Warning|Hint):\s+[A-Z]\d+\s+(.+)$');
+  Pattern.AddPair('file', TJSONNumber.Create(1));
+  Pattern.AddPair('line', TJSONNumber.Create(2));
+  Pattern.AddPair('severity', TJSONNumber.Create(3));
+  Pattern.AddPair('message', TJSONNumber.Create(4));
+  var ProblemMatcher := TJSONObject.Create;
+  ProblemMatcher.AddPair('owner', 'delphi');
+  ProblemMatcher.AddPair('fileLocation', 'absolute');
+  ProblemMatcher.AddPair('pattern', Pattern);
+  Result.AddPair('problemMatcher', ProblemMatcher);
+end;
+
+// group (including isDefault) is structural: refreshed on every upsert, not only on insert.
+procedure UpsertTaskConfig(ATasks: TJSONArray; ATask: TJSONObject; AIsDefault: Boolean);
+var
+  ExistingTask: TJSONObject;
+  TargetLabel: string;
+begin
+  TargetLabel := ATask.GetValue<string>('label', '');
+  ExistingTask := nil;
+  for var i := 0 to ATasks.Count - 1 do begin
+    var Item := ATasks.Items[i] as TJSONObject;
+    if (Item <> nil) and (Item.GetValue<string>('label', '') = TargetLabel) then begin
+      ExistingTask := Item;
+      Break;
+    end;
   end;
+
+  var GroupObj := TJSONObject.Create;
+  GroupObj.AddPair('kind', 'build');
+  GroupObj.AddPair('isDefault', TJSONBool.Create(AIsDefault));
+  ATask.AddPair('group', GroupObj);
+
+  if ExistingTask = nil then
+    ATasks.Add(ATask)
+  else begin
+    for var Pair in ATask do begin
+      ExistingTask.RemovePair(Pair.JsonString.Value).Free;
+      ExistingTask.AddPair(Pair.JsonString.Value, Pair.JsonValue.Clone as TJSONValue);
+    end;
+    ATask.Free;
+  end;
+end;
+
+// Removes plugin-generated build-task labels from a per-folder tasks.json.
+// Used in workspace mode so per-folder tasks never compete in the task picker.
+procedure CleanupPerFolderTasksJson(const AProjectDir, AProjectName: string; AIsBpl: Boolean);
+var
+  TasksFile: string;
+  Root: TJSONObject;
+  Tasks: TJSONArray;
+
+  procedure RemoveByLabel(const ALabel: string);
+  begin
+    for var i := Tasks.Count - 1 downto 0 do begin
+      var Item := Tasks.Items[i] as TJSONObject;
+      if (Item <> nil) and (Item.GetValue<string>('label', '') = ALabel) then begin
+        Tasks.Remove(i).Free;
+        Break;
+      end;
+    end;
+  end;
+
+begin
+  TasksFile := IncludeTrailingPathDelimiter(AProjectDir) + '.vscode\tasks.json';
+  if not TFile.Exists(TasksFile) then
+    Exit;
+  Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(TasksFile)) as TJSONObject;
+  if Root = nil then
+    Exit;
+  try
+    Tasks := Root.GetValue('tasks') as TJSONArray;
+    if Tasks <> nil then begin
+      RemoveByLabel('Build All (Debug Win64)');
+      if AIsBpl then
+        RemoveByLabel('Build ' + AProjectName + ' BPL (Debug Win64)')
+      else
+        RemoveByLabel('Build ' + AProjectName + ' (Debug Win64)');
+      WriteTextIfChanged(TasksFile, Root.Format, TEncoding.UTF8);
+    end;
+  finally
+    Root.Free;
+  end;
+end;
+
+// Removes the plugin-managed (and VS Code default-scaffold) delphi-win64 configs
+// from a per-folder launch.json. In a multi-root workspace the .code-workspace
+// "launch" section is authoritative and any per-folder config competes for F5.
+// User-authored configs are preserved.
+procedure CleanupPerFolderLaunchJson(const AProjectDir, AProjectName: string);
+var
+  LaunchFile: string;
+  Root: TJSONObject;
+  Configs: TJSONArray;
+
+  function IsPluginOrScaffoldConfig(AItem: TJSONObject): Boolean;
+  begin
+    Result := False;
+    if not SameText(AItem.GetValue<string>('type', ''), 'delphi-win64') then
+      Exit;
+    var ManagedVal := AItem.GetValue(PLUGIN_MANAGED_BY_FIELD);
+    if (ManagedVal <> nil) and SameText(ManagedVal.Value, PLUGIN_MANAGED_BY_VALUE) then
+      Exit(True);
+    // Name fallback for entries written before the managedBy marker existed.
+    // "Attach to <Project>.exe" only covers a program project; for a package the
+    // attach entry is named after the Host application, which is not known here
+    // -- but every attach entry the plugin has ever written carries managedBy,
+    // so the check above already caught it.
+    var ConfigName := AItem.GetValue<string>('name', '');
+    for var Candidate in ['Debug Delphi Win64', 'Debug ' + AProjectName,
+                          'Debug ' + AProjectName + ' (BPL)', 'Attach to ' + AProjectName + '.exe'] do
+      if SameText(ConfigName, Candidate) then
+        Exit(True);
+  end;
+
+begin
+  LaunchFile := IncludeTrailingPathDelimiter(AProjectDir) + '.vscode\launch.json';
+  if not TFile.Exists(LaunchFile) then
+    Exit;
+  Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(LaunchFile)) as TJSONObject;
+  if Root = nil then
+    Exit;
+  try
+    Configs := Root.GetValue('configurations') as TJSONArray;
+    if Configs = nil then
+      Exit;
+    for var i := Configs.Count - 1 downto 0 do begin
+      var Item := Configs.Items[i] as TJSONObject;
+      if (Item <> nil) and IsPluginOrScaffoldConfig(Item) then
+        Configs.Remove(i).Free;
+    end;
+    if Configs.Count = 0 then begin
+      // No remaining configs -> delete the file so VS Code does not surface an
+      // empty per-folder launch entry in the F5 dropdown.
+      TFile.Delete(LaunchFile);
+      Exit; // finally frees Root
+    end;
+    WriteTextIfChanged(LaunchFile, Root.Format, TEncoding.UTF8);
+  finally
+    Root.Free;
+  end;
+end;
+
+procedure GenerateOrUpdateTasksJsonInDir(const AProjectDir, AProjectName, AProjectFileName: string;
+  AIsBpl, AIsDefault: Boolean);
+var
+  VscodePath, TasksFile: string;
+  Root: TJSONObject;
+  Tasks: TJSONArray;
+begin
+  VscodePath := IncludeTrailingPathDelimiter(AProjectDir) + '.vscode';
+  if not TDirectory.Exists(VscodePath) then
+    TDirectory.CreateDirectory(VscodePath);
+  TasksFile := VscodePath + '\tasks.json';
+
+  if TFile.Exists(TasksFile) then
+    Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(TasksFile)) as TJSONObject
+  else
+    Root := nil;
+  if Root = nil then begin
+    Root := TJSONObject.Create;
+    Root.AddPair('version', '2.0.0');
+  end;
+  try
+    Tasks := Root.GetValue('tasks') as TJSONArray;
+    if Tasks = nil then begin
+      Tasks := TJSONArray.Create;
+      Root.AddPair('tasks', Tasks);
+    end;
+    UpsertTaskConfig(Tasks, BuildBuildTaskConfig(AProjectName, AProjectFileName, AIsBpl), AIsDefault);
+    WriteTextIfChanged(TasksFile, Root.Format, TEncoding.UTF8);
+  finally
+    Root.Free;
+  end;
+end;
+
+// Writes the .code-workspace "launch" (the managed configurations for the Delphi
+// active project: launch first, so F5 starts it without a picker, then the
+// matching attach entry) and "tasks" (one build task per project) sections.
+// User-authored entries are preserved.
+// Declared here because the implementation sits further down, next to the other
+// workspace-folder helpers.
+function ResolveFolderAbsPath(const ARelPath, AGroupPath: string): string; forward;
+
+procedure UpdateWorkspaceDebuggerSections(Root: TJSONObject; Group: IOTAProjectGroup;
+  const AGroupPath: string; ActiveProject: IOTAProject);
+begin
+  var LaunchSection := Root.GetValue('launch') as TJSONObject;
+  if LaunchSection = nil then begin
+    LaunchSection := TJSONObject.Create;
+    Root.AddPair('launch', LaunchSection);
+  end;
+  if LaunchSection.GetValue('version') = nil then
+    LaunchSection.AddPair('version', '0.2.0');
+  var LaunchConfigs := LaunchSection.GetValue('configurations') as TJSONArray;
+  if LaunchConfigs = nil then begin
+    LaunchConfigs := TJSONArray.Create;
+    LaunchSection.AddPair('configurations', LaunchConfigs);
+  end;
+  if ActiveProject <> nil then begin
+    var AProjName := ChangeFileExt(ExtractFileName(ActiveProject.FileName), '');
+    var AProjDir := ExcludeTrailingPathDelimiter(ExtractFilePath(ActiveProject.FileName));
+    var LaunchConfig: TJSONObject := nil;
+    if TFile.Exists(ChangeFileExt(ActiveProject.FileName, '.dpr')) then
+      LaunchConfig := BuildProgramLaunchConfig(AProjName, '', AProjDir, ActiveProject)
+    else if TFile.Exists(ChangeFileExt(ActiveProject.FileName, '.dpk')) then begin
+      var AHostApp := GetProjectHostApplication(ActiveProject);
+      if AHostApp <> '' then
+        LaunchConfig := BuildPackageLaunchConfig(AProjName, AProjDir, AHostApp, '',
+          ActiveProject, ExcludeTrailingPathDelimiter(AGroupPath));
+    end;
+    if LaunchConfig <> nil then begin
+      // ${workspaceFolder} is unambiguous only when the workspace has a single
+      // root. With several roots VS Code requires the named form
+      // ${workspaceFolder:Name}, so there the paths are left absolute.
+      var PortabilityRoot := '';
+      var Folders := Root.GetValue('folders') as TJSONArray;
+      if (Folders <> nil) and (Folders.Count = 1) then begin
+        var SingleRoot := (Folders.Items[0] as TJSONObject).GetValue<string>('path', '.');
+        PortabilityRoot := ResolveFolderAbsPath(SingleRoot, AGroupPath);
+      end;
+      UpsertManagedDebugConfigsFor(LaunchConfigs, LaunchConfig, PortabilityRoot);
+    end;
+  end;
+
+  // "tasks" section: one build task per project (absolute cwd, no [folder] suffix).
+  var TasksSection := Root.GetValue('tasks') as TJSONObject;
+  if TasksSection = nil then begin
+    TasksSection := TJSONObject.Create;
+    Root.AddPair('tasks', TasksSection);
+  end;
+  if TasksSection.GetValue('version') = nil then
+    TasksSection.AddPair('version', '2.0.0');
+  var WorkspaceTasks := TasksSection.GetValue('tasks') as TJSONArray;
+  if WorkspaceTasks = nil then begin
+    WorkspaceTasks := TJSONArray.Create;
+    TasksSection.AddPair('tasks', WorkspaceTasks);
+  end;
+  // Drop the legacy aggregate task written by older versions.
+  for var wi := WorkspaceTasks.Count - 1 downto 0 do begin
+    var WItem := WorkspaceTasks.Items[wi] as TJSONObject;
+    if (WItem <> nil) and (WItem.GetValue<string>('label', '') = 'Build All (Debug Win64)') then begin
+      WorkspaceTasks.Remove(wi).Free;
+      Break;
+    end;
+  end;
+  // isDefault only for the project active in Delphi: Ctrl+Shift+B runs it directly.
+  var ActiveProjName := '';
+  if ActiveProject <> nil then
+    ActiveProjName := ChangeFileExt(ExtractFileName(ActiveProject.FileName), '');
+  for var wi := 0 to Group.ProjectCount - 1 do begin
+    var WProj := Group.Projects[wi];
+    var WProjName := ChangeFileExt(ExtractFileName(WProj.FileName), '');
+    var WIsBpl := TFile.Exists(ChangeFileExt(WProj.FileName, '.dpk')) and
+                  not TFile.Exists(ChangeFileExt(WProj.FileName, '.dpr'));
+    UpsertTaskConfig(WorkspaceTasks, BuildBuildTaskConfig(WProjName, WProj.FileName, WIsBpl),
+      SameText(WProjName, ActiveProjName));
+  end;
+end;
+
+// Resolves a workspace folder path (relative to the .groupproj, or already absolute for
+// projects outside the group tree / on other drives) into its normalized native absolute
+// path, without trailing separator. '.' means the group folder itself.
+function ResolveFolderAbsPath(const ARelPath, AGroupPath: string): string;
+begin
+  if ARelPath = '.' then
+    Exit(ExcludeTrailingPathDelimiter(AGroupPath));
+
+  var Native := StringReplace(ARelPath, '/', PathDelim, [rfReplaceAll]);
+  if not TPath.IsPathRooted(Native) then
+    Native := TPath.Combine(AGroupPath, Native);
+  Result := ExcludeTrailingPathDelimiter(TPath.GetFullPath(Native));
+end;
+
+// True if AChildAbs is strictly nested under AParentAbs (native absolute paths).
+// Different drive/root -> not contained (StartsWith fails), so cross-drive is safe.
+function IsProperSubFolderAbs(const AChildAbs, AParentAbs: string): Boolean;
+begin
+  if SameText(AChildAbs, AParentAbs) then
+    Exit(False);
+  Result := AChildAbs.StartsWith(IncludeTrailingPathDelimiter(AParentAbs), True);
+end;
+
+// Drops folders that overlap others in the list: any folder nested under another one
+// (keeping the container, so every source file stays covered by exactly one root) and
+// duplicates pointing at the same folder. VS Code does not handle nested multi-root
+// folders well: files would appear twice, confusing search and the file mention picker.
+// Comparison is done on ABSOLUTE paths (internal scratch): the emitted list stays
+// relative, and no assumption is made about where the projects live.
+procedure RemoveOverlappingFolders(AFolders: TList<string>; const AGroupPath: string);
+var
+  Abs: TArray<string>;
+begin
+  SetLength(Abs, AFolders.Count);
+  for var i := 0 to AFolders.Count - 1 do
+    Abs[i] := ResolveFolderAbsPath(AFolders[i], AGroupPath);
+
+  for var i := AFolders.Count - 1 downto 0 do
+    for var j := 0 to AFolders.Count - 1 do begin
+      if i = j then
+        Continue;
+      // drop i if nested under j, or if it is the same folder as j but at a higher
+      // index (so exactly one copy survives)
+      if IsProperSubFolderAbs(Abs[i], Abs[j]) or (SameText(Abs[i], Abs[j]) and (i > j)) then begin
+        AFolders.Delete(i);
+        Delete(Abs, i, 1);
+        Break;
+      end;
+    end;
 end;
 
 function GenerateOrUpdateVSCodeWorkspace(Group: IOTAProjectGroup): string;
@@ -303,15 +1656,32 @@ begin
   Folders := TList<string>.Create;
   try
     for var i := 0 to Group.ProjectCount - 1 do begin
-      var ProjFolder := IncludeTrailingPathDelimiter(
-                          ExtractFilePath(Group.Projects[i].FileName));
+      var Proj := Group.Projects[i];
+      var ProjFolder := IncludeTrailingPathDelimiter(ExtractFilePath(Proj.FileName));
       var RelPath := ExcludeTrailingPathDelimiter(
                        ExtractRelativePath(GroupPath, ProjFolder));
       if RelPath = '' then RelPath := '.';
       RelPath := StringReplace(RelPath, '\', '/', [rfReplaceAll]);
       if not Folders.Contains(RelPath) then
         Folders.Add(RelPath);
+      // In workspace mode the .code-workspace "launch"/"tasks" sections are authoritative.
+      // Remove competing per-folder launch.json/tasks.json plugin entries.
+      if TPluginSettings.GenerateDebuggerConfig then begin
+        var ProjDir := ExcludeTrailingPathDelimiter(ProjFolder);
+        var ProjName := ChangeFileExt(ExtractFileName(Proj.FileName), '');
+        if TFile.Exists(ChangeFileExt(Proj.FileName, '.dpr')) then begin
+          CleanupPerFolderLaunchJson(ProjDir, ProjName);
+          CleanupPerFolderTasksJson(ProjDir, ProjName, False);
+        end else if TFile.Exists(ChangeFileExt(Proj.FileName, '.dpk')) then begin
+          CleanupPerFolderLaunchJson(ProjDir, ProjName);
+          CleanupPerFolderTasksJson(ProjDir, ProjName, True);
+        end;
+      end;
     end;
+
+    // Avoid overlapping roots in the workspace: if a project sits in a subfolder of
+    // another (or in the same folder as another), keep only the containing one.
+    RemoveOverlappingFolders(Folders, GroupPath);
 
     if TFile.Exists(WorkspaceFile) then
       Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(WorkspaceFile)) as TJSONObject
@@ -384,21 +1754,32 @@ begin
         Root.AddPair('settings', Settings);
       end;
       var ActiveProject := (BorlandIDEServices as IOTAModuleServices).GetActiveProject;
+      // Shared settings and recommendations come from the versioned defaults
+      // file next to the .groupproj, created from the built-in defaults when it
+      // does not exist yet.
+      var SharedDefaults := LoadOrCreateWorkspaceDefaults(GroupPath);
       try
-        ApplyStandardDelphiSettings(Settings, ActiveProject);
-      except
-        on E: Exception do
-          ShowMessage('Error updating settings: ' + E.ClassName + ': ' + E.Message);
+        try
+          ApplyStandardDelphiSettings(Settings, ActiveProject, SharedDefaults);
+        except
+          on E: Exception do
+            ShowMessage('Error updating settings: ' + E.ClassName + ': ' + E.Message);
+        end;
+
+        var ExtObj := Root.GetValue('extensions') as TJSONObject;
+        if ExtObj = nil then begin
+          ExtObj := TJSONObject.Create;
+          Root.AddPair('extensions', ExtObj);
+        end;
+        MergeExtensionRecommendations(ExtObj, SharedDefaults);
+      finally
+        SharedDefaults.Free;
       end;
 
-      var ExtObj := Root.GetValue('extensions') as TJSONObject;
-      if ExtObj = nil then begin
-        ExtObj := TJSONObject.Create;
-        Root.AddPair('extensions', ExtObj);
-      end;
-      MergeExtensionRecommendations(ExtObj);
+      if TPluginSettings.GenerateDebuggerConfig then
+        UpdateWorkspaceDebuggerSections(Root, Group, GroupPath, ActiveProject);
 
-      TFile.WriteAllText(WorkspaceFile, Root.Format, TEncoding.UTF8);
+      WriteTextIfChanged(WorkspaceFile, Root.Format, TEncoding.UTF8);
     finally
       Root.Free;
     end;
@@ -758,6 +2139,35 @@ begin
   end;
 end;
 
+procedure GenerateOrUpdateLaunchJson(const FolderPath: string; Project: IOTAProject);
+begin
+  if Project = nil then
+    Exit;
+
+  var ProjectDir := ExcludeTrailingPathDelimiter(FolderPath);
+  var ProjectName := ChangeFileExt(ExtractFileName(Project.FileName), '');
+
+  var Config: TJSONObject := nil;
+  var IsBpl := False;
+  if TFile.Exists(ChangeFileExt(Project.FileName, '.dpr')) then
+    Config := BuildProgramLaunchConfig(ProjectName, '', ProjectDir, Project)
+  else if TFile.Exists(ChangeFileExt(Project.FileName, '.dpk')) then begin
+    IsBpl := True;
+    var HostApp := GetProjectHostApplication(Project);
+    if Trim(HostApp) = '' then begin
+      ShowMessage('launch.json not updated: package "' + ProjectName +
+        '" has no Host application configured (Project Options > Debugger > Host application).');
+      Exit;
+    end;
+    Config := BuildPackageLaunchConfig(ProjectName, ProjectDir, HostApp, '', Project);
+  end;
+  if Config = nil then
+    Exit;
+
+  WriteManagedLaunchConfigToDir(ProjectDir, Config);
+  GenerateOrUpdateTasksJsonInDir(ProjectDir, ProjectName, Project.FileName, IsBpl, True);
+end;
+
 procedure OpenCurrentFileInEditor(EditorSettings: TEditorSettings);
 begin
   if EditorSettings = nil then begin
@@ -792,9 +2202,12 @@ begin
   // Determine the workspace to open: use the project group's .code-workspace if available,
   // otherwise fall back to the active project's folder
   var WorkspacePath: string;
+  var UsedGroupWorkspace := False;
   var Group := GetActiveProjectGroup;
-  if (Group <> nil) and TFile.Exists(Group.FileName) then
-    WorkspacePath := GenerateOrUpdateVSCodeWorkspace(Group)
+  if (Group <> nil) and TFile.Exists(Group.FileName) then begin
+    WorkspacePath := GenerateOrUpdateVSCodeWorkspace(Group);
+    UsedGroupWorkspace := True;
+  end
   else begin
     var project := (BorlandIDEServices as IOTAModuleServices).GetActiveProject;
     if project = nil then begin
@@ -803,6 +2216,23 @@ begin
     end;
     WorkspacePath := ExtractFilePath(project.FileName);
     GenerateOrUpdateVSCodeFolderSettings(WorkspacePath, project);
+  end;
+
+  // Generate/update .vscode/launch.json + tasks.json for the delphi-win64 debugger,
+  // ONLY in folder mode. In workspace mode these live in the .code-workspace
+  // "launch"/"tasks" sections; a per-folder copy would compete with them for F5.
+  if (not UsedGroupWorkspace) and TPluginSettings.GenerateDebuggerConfig then begin
+    var VscodeFolderPath := ExcludeTrailingPathDelimiter(WorkspacePath);
+    var LaunchProject := (BorlandIDEServices as IOTAModuleServices).GetActiveProject;
+    if LaunchProject <> nil then
+      try
+        GenerateOrUpdateLaunchJson(VscodeFolderPath, LaunchProject);
+      except
+        on E: Exception do
+          ShowMessage('launch.json generation failed: ' + E.ClassName + ': ' + E.Message);
+      end
+    else
+      ShowMessage('launch.json: GetActiveProject returned nil');
   end;
 
   // Capture variables for the thread (ToolsAPI is not thread-safe, must only be used on the main thread)

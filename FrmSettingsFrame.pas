@@ -74,6 +74,12 @@ type
     Label4: TLabel;
     Label5: TLabel;
     Label6: TLabel;
+    chkGenerateDebuggerConfig: TCheckBox;
+    chkGenerateAttachConfig: TCheckBox;
+    lblDebuggerConfigHint: TLabel;
+    LnkDebugger: TLinkLabel;
+    Label7: TLabel;
+    procedure chkGenerateDebuggerConfigClick(Sender: TObject);
     procedure BuiltInAdvancedSettingsClick(Sender: TObject);
     procedure btnAddCustomEditorClick(Sender: TObject);
     procedure BuiltInClearShortcutClick(Sender: TObject);
@@ -447,7 +453,17 @@ begin
   CreateCustomEditorDrafts;
   LoadBuiltInEditorControls;
   RebuildCustomEditorRows;
+  chkGenerateDebuggerConfig.Checked := TPluginSettings.GenerateDebuggerConfig;
+  chkGenerateAttachConfig.Checked := TPluginSettings.GenerateAttachConfig;
+  chkGenerateDebuggerConfigClick(chkGenerateDebuggerConfig);
   FFrameInitialized := True;
+end;
+
+// The attach configuration is written alongside the launch one, so it is
+// meaningless while debugger-config generation is off.
+procedure TFrmSettingsFrame.chkGenerateDebuggerConfigClick(Sender: TObject);
+begin
+  chkGenerateAttachConfig.Enabled := chkGenerateDebuggerConfig.Checked;
 end;
 
 procedure TFrmSettingsFrame.QueueCustomEditorRowsRebuild(RemovedEditor: TEditorSettings = nil);
@@ -570,6 +586,8 @@ begin
   FFrame.SaveCustomEditorControls;
   FFrame.ApplyBuiltInEditorDrafts;
   FFrame.ApplyCustomEditorDrafts;
+  TPluginSettings.GenerateDebuggerConfig := FFrame.chkGenerateDebuggerConfig.Checked;
+  TPluginSettings.GenerateAttachConfig := FFrame.chkGenerateAttachConfig.Checked;
   TPluginSettings.Save;
   TPluginSettings.NotifyShortcutChanged;
   TPluginSettings.NotifySettingsChanged;

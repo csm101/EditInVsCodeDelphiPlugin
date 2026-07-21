@@ -20,6 +20,8 @@ const
   DEFAULT_NEW_OPEN_ARGS = '--new-window {workspacePath}';
   DEFAULT_NEW_GOTO_ARGS = '--new-window {workspacePath} -g {gotoTarget}';
   DEFAULT_DELPHI_LSP_ARGS = '--command delphilsp.selectSettingsFile';
+  DEFAULT_GENERATE_DEBUGGER_CONFIG = True;
+  DEFAULT_GENERATE_ATTACH_CONFIG = True;
 
 type
   TShortcutChangedProc = reference to procedure(AShortcut: TShortCut);
@@ -78,6 +80,8 @@ type
     class var FCustomEditors: TObjectList<TEditorSettings>;
     class var FOnShortcutChanged: TShortcutChangedProc;
     class var FOnSettingsChanged: TSettingsChangedProc;
+    class var FGenerateDebuggerConfig: Boolean;
+    class var FGenerateAttachConfig: Boolean;
     class function SettingsFilePath: string; static;
     class procedure ResetToDefaults; static;
     class procedure AddDefaultBuiltInEditors; static;
@@ -97,6 +101,19 @@ type
   public
     class property VSCodeCommand: string read GetVSCodeCommand write SetVSCodeCommand;
     class property Shortcut: TShortCut read GetVSCodeShortcut write SetVSCodeShortcut;
+    /// <summary>When true, the plugin generates the delphi-win64 debugger
+    /// configuration (launch.json / tasks.json and the workspace launch/tasks
+    /// sections). When false, all debugger-config generation is skipped.</summary>
+    class property GenerateDebuggerConfig: Boolean
+      read FGenerateDebuggerConfig write FGenerateDebuggerConfig;
+    /// <summary>When true, an "Attach to &lt;exe&gt;" configuration is written
+    /// next to the launch one, carrying the same sourceRoot, sourceSearchPaths
+    /// and modules. Turning it off restores a single generated configuration,
+    /// which is what a user who never attaches wants: one entry means F5 has
+    /// nothing to choose between. Ignored when GenerateDebuggerConfig is
+    /// false.</summary>
+    class property GenerateAttachConfig: Boolean
+      read FGenerateAttachConfig write FGenerateAttachConfig;
     /// <summary>
     /// Called by the IDE Options frame after saving, so the menu action
     /// can update its shortcut without a circular unit dependency.
@@ -314,6 +331,8 @@ begin
   FBuiltInEditors.Clear;
   FCustomEditors.Clear;
   AddDefaultBuiltInEditors;
+  FGenerateDebuggerConfig := DEFAULT_GENERATE_DEBUGGER_CONFIG;
+  FGenerateAttachConfig := DEFAULT_GENERATE_ATTACH_CONFIG;
 end;
 
 class procedure TPluginSettings.AddDefaultBuiltInEditors;
@@ -501,6 +520,16 @@ end;
 
 class procedure TPluginSettings.LoadNewSettings(Root: TJSONObject);
 begin
+  var DbgConfigValue := Root.GetValue('generateDebuggerConfig');
+  if DbgConfigValue <> nil then
+    FGenerateDebuggerConfig := SameText(DbgConfigValue.Value, 'true');
+
+  // Absent in files written before the attach configuration existed: those users
+  // keep the default and start getting the entry, which is the intended upgrade.
+  var AttachConfigValue := Root.GetValue('generateAttachConfig');
+  if AttachConfigValue <> nil then
+    FGenerateAttachConfig := SameText(AttachConfigValue.Value, 'true');
+
   var BuiltInEditorsArray := Root.GetValue('builtInEditors') as TJSONArray;
   if BuiltInEditorsArray <> nil then
     for var BuiltInEditorValue in BuiltInEditorsArray do begin
@@ -578,6 +607,8 @@ begin
   Root := TJSONObject.Create;
   try
     Root.AddPair('formatVersion', TJSONNumber.Create(SETTINGS_FORMAT_VERSION));
+    Root.AddPair('generateDebuggerConfig', TJSONBool.Create(FGenerateDebuggerConfig));
+    Root.AddPair('generateAttachConfig', TJSONBool.Create(FGenerateAttachConfig));
 
     BuiltInEditorsArray := TJSONArray.Create;
     for var BuiltInEditor in FBuiltInEditors do

@@ -1,5 +1,21 @@
 # Edit in Visual Studio Code (Delphi Plugin)
 
+> [!IMPORTANT]
+> **New: support for the Delphi Win64 Debugger for VS Code.**
+> The plugin now generates, for the active project or project group, the launch
+> **and** attach configurations used by
+> [delphi-visual-studio-code-debugger](https://github.com/csm101/delphi-visual-studio-code-debugger) —
+> a real debugger for Delphi Win64 applications inside VS Code, with breakpoints,
+> stepping, call stacks, watches and variable inspection.
+>
+> That configuration is the tedious part: output paths, source root, the unit
+> search paths and the package list for a BPL project — a few hundred entries on
+> a real project. The plugin derives them from the project options you already
+> have, so debugging is one command away from the IDE you are already in.
+>
+> Nothing changes if you do not use the debugger: the generated entries are
+> simply ignored.
+
 > [!NOTE]
 > Although most of this README focuses on Visual Studio Code itself, the plugin can also be configured to work with other editors built on the same VS Code/Electron foundation, including Cursor, Windsurf, TRAE, and VSCodium. A dedicated section later in this document explains how to enable and configure those editors.
 
@@ -34,6 +50,30 @@ The latest version adds several practical improvements:
 6. Automatic Delphi workspace cleanup defaults: the plugin configures `files.exclude` with common Delphi output/history patterns (`**/Debug`, `**/Release`, `**/Win32/Debug`, `**/Win32/Release`, `**/Win64/Debug`, `**/Win64/Release`, `**/__recovery`, `**/__history`, `**/.#*`, `**/*.rc`, `**/*.res`, `**/*.RES`, `**/*.bak`, `**/*.BAK`).
 7. Better launch diagnostics: startup failures now show a detailed, copyable error dialog with command line, working directory, exit code, stdout, and stderr.
 8. Better Delphi form workflow support: the plugin warns when child forms are open and handles the most common IDE edge cases before switching to the external editor.
+9. Team-shareable defaults: settings and extension recommendations now come from a `vscode-workspace-defaults.json` file next to your project or project group. Put that file under version control; the generated `.code-workspace` does not need to be, and should not be (see below).
+10. Checkout-independent debug configuration: generated paths are written relative to the workspace as `${workspaceFolder}/...` whenever possible, so a configuration produced on one machine still works on a colleague's, wherever the project is checked out.
+
+## Which Generated Files Should Be Version-Controlled?
+
+Put **`vscode-workspace-defaults.json`** under version control. It holds what the
+whole team shares - editor settings and recommended extensions - and the plugin
+creates it, filled with sensible defaults, the first time it generates a
+workspace. Edit it freely afterwards: the plugin reads it and never rewrites it.
+
+Do **not** version the generated `.code-workspace`. It is derived, per-machine
+state: the folder list, the project that happened to be active in the IDE, and a
+debug configuration pointing at your own build output. Two developers working on
+different projects of the same group will produce different content every time,
+which turns every commit into a conflict.
+
+The same applies to `.vscode/launch.json` and `.vscode/tasks.json` in
+single-project (folder) mode.
+
+Paths inside the generated configuration are made relative to the workspace when
+possible, so a dependency checked out beside the project appears as
+`${workspaceFolder}/../shared-lib` rather than `C:/somewhere/shared-lib`. The
+relative form is derived from your actual paths, never assumed: a path on another
+drive, or one with no common root, is left absolute.
 
 ## Release Notes
 
