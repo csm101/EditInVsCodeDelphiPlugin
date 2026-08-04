@@ -87,6 +87,7 @@ drive, or one with no common root, is left absolute.
 6. Dedicated launch error dialog with copyable diagnostics.
 7. Child form detection and warning dialog before opening files externally.
 8. Automatic `files.exclude` defaults for common Delphi build/output/history artifacts (`Debug/Release`, `Win32/Win64`, `__recovery`, `__history`, `.rc/.res/.bak`, and temporary lock-like files).
+9. Run Parameters support: the generated launch configuration now includes the project's Run Parameters (Run > Parameters in the IDE) as its `args` array, so F5 in VS Code starts the program with the same command line the IDE's own Run would use; for a package project, the parameters are passed to the host application.
 
 ### Changed
 

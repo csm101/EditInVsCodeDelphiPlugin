@@ -1124,6 +1124,81 @@ begin
   Result := ExpandProjectMacros(RawHostApp, ProjectDir, ProjectName, PlatformName, ConfigName);
 end;
 
+// Reads the project's Run Parameters (Run > Parameters in the IDE, stored as
+// Debugger_RunParams) for the active configuration/platform, macro-expanded the
+// same way as the Host application. Empty result means none are configured.
+function GetProjectRunParameters(AProject: IOTAProject): string;
+var
+  ProjectDir, ProjectName, PlatformName, ConfigName: string;
+begin
+  Result := '';
+  if AProject = nil then
+    Exit;
+
+  var RawParams := GetProjectOptionValue(AProject, sDebugger_RunParams);
+  if RawParams = '' then
+    Exit;
+
+  GetActiveProjectBuildContext(AProject, ProjectDir, ProjectName, PlatformName, ConfigName);
+  Result := Trim(ExpandProjectMacros(RawParams, ProjectDir, ProjectName, PlatformName, ConfigName));
+end;
+
+// Splits a Run Parameters string into argv entries: whitespace separates
+// arguments and double quotes group a segment that may contain spaces. The
+// quotes themselves are not part of the value, so '-flag "value with spaces"'
+// becomes ['-flag', 'value with spaces'].
+function SplitRunParametersIntoArgs(const ARunParameters: string): TArray<string>;
+var
+  CurrentArg: string;
+  HasPendingArg: Boolean;
+
+  procedure FlushPendingArg;
+  begin
+    if not HasPendingArg then
+      Exit;
+    Result := Result + [CurrentArg];
+    CurrentArg := '';
+    HasPendingArg := False;
+  end;
+
+begin
+  Result := [];
+  CurrentArg := '';
+  HasPendingArg := False;
+
+  var InsideQuotes := False;
+  for var Ch in ARunParameters do begin
+    if Ch = '"' then begin
+      // An empty quoted segment ("") still counts as a real (empty) argument.
+      InsideQuotes := not InsideQuotes;
+      HasPendingArg := True;
+      Continue;
+    end;
+    if (not InsideQuotes) and ((Ch = ' ') or (Ch = #9)) then begin
+      FlushPendingArg;
+      Continue;
+    end;
+    CurrentArg := CurrentArg + Ch;
+    HasPendingArg := True;
+  end;
+  FlushPendingArg;
+end;
+
+// Returns the launch "args" array built from AProject's Run Parameters, or nil
+// when the project defines none. The debug adapter expects an array of argv
+// entries, not the raw command-line string.
+function BuildRunParameterArgs(AProject: IOTAProject): TJSONArray;
+begin
+  Result := nil;
+  var Args := SplitRunParametersIntoArgs(GetProjectRunParameters(AProject));
+  if Length(Args) = 0 then
+    Exit;
+
+  Result := TJSONArray.Create;
+  for var Arg in Args do
+    Result.Add(Arg);
+end;
+
 function BuildProgramLaunchConfig(const AProjectName, APreLaunchTask, AProjectDir: string;
   AProject: IOTAProject): TJSONObject;
 var
@@ -1146,6 +1221,9 @@ begin
   if APreLaunchTask <> '' then
     Result.AddPair('preLaunchTask', APreLaunchTask);
   Result.AddPair('program', ProgramPath);
+  var RunArgs := BuildRunParameterArgs(AProject);
+  if RunArgs <> nil then
+    Result.AddPair('args', RunArgs);
   Result.AddPair('mapFile', MapPath);
   Result.AddPair('rsmFile', RsmPath);
   Result.AddPair('sourceRoot', Base);
@@ -1181,6 +1259,11 @@ begin
   if APreLaunchTask <> '' then
     Result.AddPair('preLaunchTask', APreLaunchTask);
   Result.AddPair('program', ExpandedHostApp);
+  // The package project's Run Parameters are the host application's command
+  // line - the same thing the IDE's own Run passes to the host.
+  var RunArgs := BuildRunParameterArgs(AProject);
+  if RunArgs <> nil then
+    Result.AddPair('args', RunArgs);
 
   HostMapFile := ChangeFileExt(ExpandedHostApp, '.map');
   if TFile.Exists(StringReplace(HostMapFile, '/', '\', [rfReplaceAll])) then
@@ -1379,16 +1462,35 @@ begin
   end;
 end;
 
-function BuildBuildTaskConfig(const AProjectName, AProjectFileName: string; AIsBpl: Boolean): TJSONObject;
+// The label the plugin gives its own build task. Kept in one place because the
+// task is written under this name, referenced by the launch configuration's
+// preLaunchTask under this name, and removed under this name -- three sites that
+// silently stop matching if they disagree.
+function BuildTaskLabelFor(const AProjectName, APlatformName, AConfigName: string;
+  AIsBpl: Boolean): string;
+begin
+  Result := 'Build ' + AProjectName;
+  if AIsBpl then
+    Result := Result + ' BPL';
+  Result := Result + ' (' + AConfigName + ' ' + APlatformName + ')';
+end;
+
+// The build task follows the project's ACTIVE platform and configuration.
+//
+// Both used to be hardcoded to Debug/Win64, and the task is wired as the launch
+// configuration's preLaunchTask -- so on a Win32 project F5 rebuilt Win64 and
+// then launched the Win32 binary, which nothing had rebuilt. The failure looks
+// like a debugger fault: breakpoints land on the wrong line and locals read as
+// garbage, because the binary no longer matches the source.
+function BuildBuildTaskConfig(const AProjectName, AProjectFileName,
+  APlatformName, AConfigName: string; AIsBpl: Boolean): TJSONObject;
 var
   TaskLabel, DprojFile, MsBuildCmd: string;
 begin
-  if AIsBpl then
-    TaskLabel := 'Build ' + AProjectName + ' BPL (Debug Win64)'
-  else
-    TaskLabel := 'Build ' + AProjectName + ' (Debug Win64)';
+  TaskLabel := BuildTaskLabelFor(AProjectName, APlatformName, AConfigName, AIsBpl);
   DprojFile := ExtractFileName(AProjectFileName);
-  MsBuildCmd := 'rsvars.bat && msbuild ' + DprojFile + ' /t:Build /p:Config=Debug;Platform=Win64 /nologo';
+  MsBuildCmd := 'rsvars.bat && msbuild ' + DprojFile + ' /t:Build /p:Config=' +
+    AConfigName + ';Platform=' + APlatformName + ' /nologo';
 
   Result := TJSONObject.Create;
   Result.AddPair('label', TaskLabel);
@@ -1470,6 +1572,17 @@ var
     end;
   end;
 
+  // No Break: there may be one task per platform left over from earlier runs,
+  // and stopping at the first would leak the rest.
+  procedure RemoveByLabelPrefix(const APrefix: string);
+  begin
+    for var i := Tasks.Count - 1 downto 0 do begin
+      var Item := Tasks.Items[i] as TJSONObject;
+      if (Item <> nil) and Item.GetValue<string>('label', '').StartsWith(APrefix) then
+        Tasks.Remove(i).Free;
+    end;
+  end;
+
 begin
   TasksFile := IncludeTrailingPathDelimiter(AProjectDir) + '.vscode\tasks.json';
   if not TFile.Exists(TasksFile) then
@@ -1481,10 +1594,14 @@ begin
     Tasks := Root.GetValue('tasks') as TJSONArray;
     if Tasks <> nil then begin
       RemoveByLabel('Build All (Debug Win64)');
+      // By PREFIX, not by exact label: the suffix carries the configuration and
+      // platform, so a project switched from Win64 to Win32 would otherwise
+      // leave its old task behind for good. The prefix is the plugin's own
+      // naming scheme, so nothing hand-written is touched.
       if AIsBpl then
-        RemoveByLabel('Build ' + AProjectName + ' BPL (Debug Win64)')
+        RemoveByLabelPrefix('Build ' + AProjectName + ' BPL (')
       else
-        RemoveByLabel('Build ' + AProjectName + ' (Debug Win64)');
+        RemoveByLabelPrefix('Build ' + AProjectName + ' (');
       WriteTextIfChanged(TasksFile, Root.Format, TEncoding.UTF8);
     end;
   finally
@@ -1550,8 +1667,8 @@ begin
   end;
 end;
 
-procedure GenerateOrUpdateTasksJsonInDir(const AProjectDir, AProjectName, AProjectFileName: string;
-  AIsBpl, AIsDefault: Boolean);
+procedure GenerateOrUpdateTasksJsonInDir(const AProjectDir, AProjectName, AProjectFileName,
+  APlatformName, AConfigName: string; AIsBpl, AIsDefault: Boolean);
 var
   VscodePath, TasksFile: string;
   Root: TJSONObject;
@@ -1576,7 +1693,8 @@ begin
       Tasks := TJSONArray.Create;
       Root.AddPair('tasks', Tasks);
     end;
-    UpsertTaskConfig(Tasks, BuildBuildTaskConfig(AProjectName, AProjectFileName, AIsBpl), AIsDefault);
+    UpsertTaskConfig(Tasks, BuildBuildTaskConfig(AProjectName, AProjectFileName,
+      APlatformName, AConfigName, AIsBpl), AIsDefault);
     WriteTextIfChanged(TasksFile, Root.Format, TEncoding.UTF8);
   finally
     Root.Free;
@@ -1662,8 +1780,13 @@ begin
     var WProjName := ChangeFileExt(ExtractFileName(WProj.FileName), '');
     var WIsBpl := TFile.Exists(ChangeFileExt(WProj.FileName, '.dpk')) and
                   not TFile.Exists(ChangeFileExt(WProj.FileName, '.dpr'));
-    UpsertTaskConfig(WorkspaceTasks, BuildBuildTaskConfig(WProjName, WProj.FileName, WIsBpl),
-      SameText(WProjName, ActiveProjName));
+    // Per project, not per group: a group may well mix platforms, and taking the
+    // active project's platform for all of them would build the wrong thing for
+    // every project but one.
+    var WProjDir, WProjNameCtx, WPlatform, WConfig: string;
+    GetActiveProjectBuildContext(WProj, WProjDir, WProjNameCtx, WPlatform, WConfig);
+    UpsertTaskConfig(WorkspaceTasks, BuildBuildTaskConfig(WProjName, WProj.FileName,
+      WPlatform, WConfig, WIsBpl), SameText(WProjName, ActiveProjName));
   end;
 end;
 
@@ -2240,7 +2363,10 @@ begin
     Exit;
 
   WriteManagedLaunchConfigToDir(ProjectDir, Config);
-  GenerateOrUpdateTasksJsonInDir(ProjectDir, ProjectName, Project.FileName, IsBpl, True);
+  var TaskProjDir, TaskProjName, TaskPlatform, TaskConfig: string;
+  GetActiveProjectBuildContext(Project, TaskProjDir, TaskProjName, TaskPlatform, TaskConfig);
+  GenerateOrUpdateTasksJsonInDir(ProjectDir, ProjectName, Project.FileName,
+    TaskPlatform, TaskConfig, IsBpl, True);
 end;
 
 procedure OpenCurrentFileInEditor(EditorSettings: TEditorSettings);
