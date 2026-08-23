@@ -988,7 +988,7 @@ begin
   if (AConfig = nil) or (AWorkspaceDir = '') then
     Exit;
 
-  for var PairName in ['program', 'sourceRoot', 'mapFile', 'rsmFile'] do
+  for var PairName in ['program', 'sourceRoot', 'mapFile', 'rsmFile', 'delphiProjectFile'] do
     RewritePathPair(AConfig, PairName);
 
   var Paths := AConfig.GetValue('sourceSearchPaths');
@@ -1220,6 +1220,10 @@ begin
   Result.AddPair('name', 'Debug ' + AProjectName);
   if APreLaunchTask <> '' then
     Result.AddPair('preLaunchTask', APreLaunchTask);
+  // Identifies the Delphi project this configuration was generated from, so the
+  // debug adapter can key project-scoped state (exception rules, for instance)
+  // to the real .dpr/.dpk instead of to a launch.json entry.
+  Result.AddPair('delphiProjectFile', NormalizePathForJson(AProject.FileName));
   Result.AddPair('program', ProgramPath);
   var RunArgs := BuildRunParameterArgs(AProject);
   if RunArgs <> nil then
@@ -1258,6 +1262,9 @@ begin
   Result.AddPair('name', 'Debug ' + AProjectName + ' (BPL)');
   if APreLaunchTask <> '' then
     Result.AddPair('preLaunchTask', APreLaunchTask);
+  // See BuildProgramLaunchConfig: the package project itself, not the host
+  // application, is what project-scoped adapter state belongs to.
+  Result.AddPair('delphiProjectFile', NormalizePathForJson(AProject.FileName));
   Result.AddPair('program', ExpandedHostApp);
   // The package project's Run Parameters are the host application's command
   // line - the same thing the IDE's own Run passes to the host.
@@ -1347,8 +1354,10 @@ begin
   // a process the debugger does not own, so killing it on stop would be wrong.
   Result.AddPair('killOnDetach', TJSONBool.Create(False));
 
-  // The symbol/source properties are shared verbatim with the launch entry.
-  for var PairName in ['sourceRoot', 'sourceSearchPaths', 'modules'] do begin
+  // The symbol/source properties are shared verbatim with the launch entry, and
+  // so is the originating project: attaching to the process debugs the same
+  // Delphi project the launch entry builds.
+  for var PairName in ['sourceRoot', 'sourceSearchPaths', 'modules', 'delphiProjectFile'] do begin
     var Value := ALaunchConfig.GetValue(PairName);
     if Value <> nil then
       Result.AddPair(PairName, Value.Clone as TJSONValue);
