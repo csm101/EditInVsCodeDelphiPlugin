@@ -52,6 +52,7 @@ The latest version adds several practical improvements:
 8. Better Delphi form workflow support: the plugin warns when child forms are open and handles the most common IDE edge cases before switching to the external editor.
 9. Team-shareable defaults: settings and extension recommendations now come from a `vscode-workspace-defaults.json` file next to your project or project group. Put that file under version control; the generated `.code-workspace` does not need to be, and should not be (see below).
 10. Checkout-independent debug configuration: generated paths are written relative to the workspace as `${workspaceFolder}/...` whenever possible, so a configuration produced on one machine still works on a colleague's, wherever the project is checked out.
+11. The generated debug configurations now name the Delphi project they come from (`delphiProjectFile`), which the Win64 debugger uses to keep project-scoped settings tied to the project itself (see below).
 
 ## Which Generated Files Should Be Version-Controlled?
 
@@ -75,6 +76,39 @@ possible, so a dependency checked out beside the project appears as
 relative form is derived from your actual paths, never assumed: a path on another
 drive, or one with no common root, is left absolute.
 
+## Project Identity in the Generated Debug Configuration
+
+Every generated `delphi-win64` configuration - the launch one and the matching
+attach one - carries a `delphiProjectFile` property naming the Delphi project it
+was generated from:
+
+```json
+{
+  "type": "delphi-win64",
+  "request": "launch",
+  "name": "Debug Debugme",
+  "delphiProjectFile": "${workspaceFolder}/Debugme.dpr",
+  "program": "${workspaceFolder}/Win64/Debug/Debugme.exe"
+}
+```
+
+It is there for a development under way in
+[delphi-visual-studio-code-debugger](https://github.com/csm101/delphi-visual-studio-code-debugger):
+the debug adapter is gaining settings that belong to a **project** rather than to
+one launch entry - exception handling rules (break on this exception class,
+ignore that one) first of all. Without a project identity in the configuration
+the only key available is the `launch.json` entry itself, so those rules would
+follow the entry instead of the project: rename a configuration, regenerate it,
+or add a second one for the same program, and the rules are lost or silently
+split in two.
+
+Like every other path, it is written as `${workspaceFolder}/...` whenever it can
+be, so the same project is recognized as the same project on a colleague's
+machine and in a different checkout.
+
+Nothing breaks with a debug adapter that does not know the property yet: unknown
+properties are simply ignored.
+
 ## Release Notes
 
 ### Added
@@ -88,6 +122,7 @@ drive, or one with no common root, is left absolute.
 7. Child form detection and warning dialog before opening files externally.
 8. Automatic `files.exclude` defaults for common Delphi build/output/history artifacts (`Debug/Release`, `Win32/Win64`, `__recovery`, `__history`, `.rc/.res/.bak`, and temporary lock-like files).
 9. Run Parameters support: the generated launch configuration now includes the project's Run Parameters (Run > Parameters in the IDE) as its `args` array, so F5 in VS Code starts the program with the same command line the IDE's own Run would use; for a package project, the parameters are passed to the host application.
+10. `delphiProjectFile` in the generated debug configurations: every generated launch **and** attach configuration now carries the path of the Delphi project (`.dpr` or `.dpk`) it was generated from, written relative to the workspace like every other path. See "Project Identity in the Generated Debug Configuration" below.
 
 ### Changed
 
